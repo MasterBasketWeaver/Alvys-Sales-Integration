@@ -17,18 +17,58 @@ page 80800 "BAASI Alvys Sales Setup"
                 {
                     ShowMandatory = true;
                 }
+                field("Client ID"; Rec."Client ID")
+                {
+                    ShowMandatory = true;
+                }
+                field("Client Secret"; Rec."Client Secret")
+                {
+                    ShowMandatory = true;
+                }
+                field("Tractor Code Dimension"; Rec."Tractor Code Dimension")
+                {
+                    ShowMandatory = true;
+                }
 
                 group(Token)
                 {
-                    field("API Token"; Rec."API Token")
+                    field("Access Token"; AccessTokenTxt)
                     {
-                        Visible = Rec."Use API Token";
+                        Caption = 'Access Token';
+                        ToolTip = 'The access token used to authenticate requests to the Alvys API.';
+                        Editable = false;
+                        ExtendedDatatype = Masked;
                     }
-                    field("API Token Expiry Date"; Rec."API Token Expiry Date")
+                    field("Access Token Expiry Date"; Rec."Access Token Expiry Date")
                     {
-                        Visible = Rec."Use API Token";
+                        Editable = false;
                     }
                 }
+            }
+        }
+    }
+
+    actions
+    {
+        area(Processing)
+        {
+            action("Refresh Access Token")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Gets a new access token from Alvys and saves it to the setup.';
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+                PromotedOnly = true;
+                Image = Refresh;
+
+                trigger OnAction()
+                var
+                    AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+                begin
+                    AlvysSalesMgt.GetBearerToken(Rec);
+                    CurrPage.Update(false);
+                end;
             }
         }
     }
@@ -41,4 +81,12 @@ page 80800 "BAASI Alvys Sales Setup"
             Rec.Insert(true);
         end;
     end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        AccessTokenTxt := Rec.GetAccessToken();
+    end;
+
+    var
+        AccessTokenTxt: Text;
 }

@@ -17,6 +17,56 @@ page 80801 "BAASI Alvys Sales Entries"
             repeater(Entries)
             {
                 field("Entry No."; Rec."Entry No.") { }
+                field("User ID"; Rec."User ID") { }
+                field("Document Type"; Rec."Document Type") { }
+                field("Document No."; Rec."Document No.") { }
+                field(Method; Rec.Method) { }
+                field(URL; Rec.URL) { }
+                field(Response; Rec.Response) { }
+                field("Error Message"; Rec."Error Message")
+                {
+                    trigger OnDrillDown()
+                    begin
+                        Rec.DisplayErrorMessage();
+                    end;
+                }
+            }
+        }
+    }
+
+    actions
+    {
+        area(Processing)
+        {
+            action("Show Request Body")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Shows the request body that was sent to Alvys.';
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+                PromotedOnly = true;
+                Image = ViewDetails;
+
+                trigger OnAction()
+                begin
+                    Rec.DisplayRequestBody();
+                end;
+            }
+            action("Show Error")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Shows the error message and error stack for the entry.';
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+                PromotedOnly = true;
+                Image = ErrorLog;
+
+                trigger OnAction()
+                begin
+                    Rec.DisplayErrorMessage();
+                end;
             }
         }
     }
