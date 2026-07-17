@@ -11,5 +11,7 @@ permissionset 80800 "BAASI Alvys Perms."
         codeunit "BAASI Alvys Sales Mgt." = X,
         codeunit "BAASI Install" = X,
         codeunit "BAASI Subscribers" = X,
-        codeunit "BAASI Upgrade" = X;
+        codeunit "BAASI Upgrade" = X,
+        codeunit "BAAPI Json Mgt." = X,
+        codeunit "BAAPI REST API Mgt." = X;
 }
