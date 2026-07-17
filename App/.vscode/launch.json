@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        //https://businesscentral.dynamics.com/0b8281e8-7af6-4870-bd74-03d5eed3e4a0/production
+        {
+            //https://businesscentral.dynamics.com/0b8281e8-7af6-4870-bd74-03d5eed3e4a0/Sandbox_041226
+            "name": "Sandbox_041226",
+            "request": "launch",
+            "type": "al",
+            "tenant": "0b8281e8-7af6-4870-bd74-03d5eed3e4a0",
+            "environmentType": "Sandbox",
+            "environmentName": "Sandbox_041226",
+            "startupObjectId": 80800,
+            "startupObjectType": "Page",
+            "startupCompany": "TEST TTG",
+            "breakOnError": "All",
+            "launchBrowser": false,
+            "enableLongRunningSqlStatements": true,
+            "enableSqlInformationDebugger": true,
+            // "schemaUpdateMode": "ForceSync"
+        }
+    ]
+}
