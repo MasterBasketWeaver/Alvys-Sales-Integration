@@ -39,6 +39,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         SendTime: DateTime;
         ExpiresIn: Integer;
         ExpiryDuration: Duration;
+        RequestHeaderValues: Dictionary of [Text, Text];
         AccessToken, ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
@@ -50,7 +51,8 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.WriteTo(RequestBody);
         // the token request is not logged, as the request body contains the client secret
         // and the response contains the access token
-        Sent := SendHttpRequest('POST', TokenURLLbl, 'application/json', '', RequestBody, ResponseObj, ResponseText, ErrorText);
+        PrepareHeaderValues('', RequestHeaderValues);
+        Sent := RESTAPIMgt.TrySendJsonRequest('POST', TokenURLLbl, 'application/json', RequestBody, RequestHeaderValues, ResponseObj, ResponseText, ErrorText);
         if not Sent then
             Error(ErrorText);
         AccessToken := JsonMgt.GetJsonValueAsText(ResponseObj, 'access_token');
@@ -294,67 +296,25 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
-    /// Authenticates and sends the request. Never raises; the caller logs the outcome and decides
-    /// whether to surface ErrorText as an error.
+    /// Authenticates and sends the request through the shared REST codeunit. Never raises; the
+    /// caller logs the outcome and decides whether to surface ErrorText as an error.
     /// </summary>
     local procedure SendAndParse(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; var ResponseObj: JsonObject; var RequestBody: Text; var ResponseText: Text; var ErrorText: Text): Boolean
+    var
+        RequestHeaderValues: Dictionary of [Text, Text];
     begin
         if JsonBody.Keys().Count() > 0 then
             JsonBody.WriteTo(RequestBody);
-        exit(SendHttpRequest(Method, URL, ContentType, CheckToGetAccessToken(), RequestBody, ResponseObj, ResponseText, ErrorText));
+        PrepareHeaderValues(CheckToGetAccessToken(), RequestHeaderValues);
+        exit(RESTAPIMgt.TrySendJsonRequest(Method, URL, ContentType, RequestBody, RequestHeaderValues, ResponseObj, ResponseText, ErrorText));
     end;
 
-    /// <summary>
-    /// Builds and sends the request directly rather than going through the shared REST codeunit.
-    /// That codeunit stages headers on caller-supplied HttpHeaders and copies them across with
-    /// GetValues/Get(1), but two staged HttpHeaders share one value pool, so Content-Type gets
-    /// handed the Authorization value and BC rejects the request. Setting the headers straight on
-    /// the request message and its content avoids the staging step entirely.
-    /// Never raises; failures are reported through ErrorText.
-    /// </summary>
-    local procedure SendHttpRequest(Method: Text; URL: Text; ContentType: Text; AccessToken: Text; RequestBody: Text; var ResponseObj: JsonObject; var ResponseText: Text; var ErrorText: Text): Boolean
-    var
-        Client: HttpClient;
-        Content: HttpContent;
-        RequestMsg: HttpRequestMessage;
-        ResponseMsg: HttpResponseMessage;
-        ContentHeaders: HttpHeaders;
-        RequestHeaders: HttpHeaders;
+    local procedure PrepareHeaderValues(AccessToken: Text; var RequestHeaderValues: Dictionary of [Text, Text])
     begin
-        Clear(ResponseObj);
-        ErrorText := '';
-        ResponseText := '';
-        RequestMsg.SetRequestUri(URL);
-        RequestMsg.Method(Method);
-        RequestMsg.GetHeaders(RequestHeaders);
+        Clear(RequestHeaderValues);
         if AccessToken <> '' then
-            RequestHeaders.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
-        RequestHeaders.Add('Accept', 'application/json');
-        if RequestBody <> '' then begin
-            Content.WriteFrom(RequestBody);
-            // content headers must be set before the content is assigned: assigning copies it
-            Content.GetHeaders(ContentHeaders);
-            if ContentHeaders.Contains('Content-Type') then
-                ContentHeaders.Remove('Content-Type');
-            ContentHeaders.Add('Content-Type', ContentType);
-            RequestMsg.Content(Content);
-        end;
-        if not Client.Send(RequestMsg, ResponseMsg) then begin
-            ErrorText := StrSubstNo(UnableToSendErr, GetLastErrorText());
-            exit(false);
-        end;
-        ResponseMsg.Content().ReadAs(ResponseText);
-        if not ResponseMsg.IsSuccessStatusCode() then begin
-            if ResponseText = '' then
-                ResponseText := StrSubstNo('%1 - %2', ResponseMsg.HttpStatusCode(), ResponseMsg.ReasonPhrase());
-            ErrorText := ResponseText;
-            exit(false);
-        end;
-        if not ResponseObj.ReadFrom(ResponseText) then begin
-            ErrorText := StrSubstNo(UnableToReadErr, ResponseText);
-            exit(false);
-        end;
-        exit(true);
+            RequestHeaderValues.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
+        RequestHeaderValues.Add('Accept', 'application/json');
     end;
 
     /// <summary>
@@ -403,13 +363,12 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         JsonMgt: Codeunit "BAAPI Json Mgt.";
+        RESTAPIMgt: Codeunit "BAAPI REST API Mgt.";
         LoadedSetup: Boolean;
         BearerTok: Label 'Bearer %1', Locked = true, Comment = '%1 = Access Token';
         TokenURLLbl: Label 'https://auth.alvys.com/oauth/token', Locked = true;
         AudienceLbl: Label 'https://api.alvys.com/public/', Locked = true;
         TokenMissingErr: Label 'access_token not found in response:\%1', Comment = '%1 = Response Text';
-        UnableToSendErr: Label 'Unable to send request:\%1', Comment = '%1 = Error Text';
-        UnableToReadErr: Label 'Unable to read response:\%1', Comment = '%1 = Response Text';
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';
         TruckIdTok: Label 'TruckId', Locked = true;
