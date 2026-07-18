@@ -3,7 +3,7 @@
   "name": "Alvys Sales Integration",
   "description": "Integrates Business Central sales functionality with Alvys.",
   "publisher": "BryanA BC Developments Inc.",
-  "logo": "./Logo/BryanAlogo.jpg",
+  "logo": "./Logo/BryanALogo.jpg",
   "version": "27.0.1.0",
   "runtime": "16.0",
   "target": "Cloud",
