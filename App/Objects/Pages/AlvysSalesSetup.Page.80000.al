@@ -62,6 +62,9 @@ page 80800 "BAASI Alvys Sales Setup"
                 var
                     AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
                 begin
+                    Rec.TestField("Integration URL");
+                    Rec.TestField("Client ID");
+                    Rec.TestField("Client Secret");
                     AlvysSalesMgt.GetBearerToken(Rec);
                     CurrPage.Update(false);
                 end;

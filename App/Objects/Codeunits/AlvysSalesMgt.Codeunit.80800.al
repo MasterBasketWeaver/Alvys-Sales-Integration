@@ -42,8 +42,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AccessToken, ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
-        AlvysSalesSetup.TestField("Client ID");
-        AlvysSalesSetup.TestField("Client Secret");
         SendTime := CurrentDateTime();
         JsonBody.Add('client_id', AlvysSalesSetup."Client ID");
         JsonBody.Add('client_secret', AlvysSalesSetup."Client Secret");
@@ -118,7 +116,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     begin
-        exit(CreateDeductionForAsset(TruckIdTok, TruckID, Date, Amount, Category, Description));
+        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description));
     end;
 
     procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
@@ -139,17 +137,17 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
     begin
-        exit(CreateDeductionForAsset(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, Posted));
     end;
 
     procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     begin
-        exit(CreateDeductionForAsset(DriverIdTok, DriverID, Date, Amount, Category, Description));
+        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description));
     end;
 
     procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
     begin
-        exit(CreateDeductionForAsset(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, Posted));
     end;
 
     /// <summary>
@@ -157,7 +155,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// exactly one of them is written to the body, named by AssetIdFieldName. Returns the Id of the
     /// deduction Alvys created.
     /// </summary>
-    local procedure CreateDeductionForAsset(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
+    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     var
         JsonBody, ResponseObj : JsonObject;
     begin
@@ -166,7 +164,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(InsertDeduction(ResponseObj));
     end;
 
-    local procedure CreateDeductionForAsset(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
     var
         JsonBody, ResponseObj : JsonObject;
     begin
