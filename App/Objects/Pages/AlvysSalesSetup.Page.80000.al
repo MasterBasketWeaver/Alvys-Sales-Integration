@@ -56,10 +56,6 @@ page 80800 "BAASI Alvys Sales Setup"
             {
                 ApplicationArea = All;
                 ToolTip = 'Gets a new access token from Alvys and saves it to the setup.';
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                PromotedOnly = true;
                 Image = Refresh;
 
                 trigger OnAction()
@@ -69,6 +65,18 @@ page 80800 "BAASI Alvys Sales Setup"
                     AlvysSalesMgt.GetBearerToken(Rec);
                     CurrPage.Update(false);
                 end;
+            }
+        }
+
+        area(Promoted)
+        {
+            group(Category_Process)
+            {
+                Caption = 'Process';
+
+                actionref("Refresh Access Token_Promoted"; "Refresh Access Token")
+                {
+                }
             }
         }
     }

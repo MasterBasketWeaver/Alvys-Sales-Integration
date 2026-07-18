@@ -84,7 +84,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('Page', 1);
         JsonBody.Add('PageSize', 100);
         JsonBody.Add('TruckNumber', TruckNumber);
-        URL := StrSubstNo(TruckSearchURLTok, AlvysSetup."Integration URL", APIVersionTok);
+        URL := AlvysSetup."Integration URL" + 'trucks/search';
         ResponseObj := SendAPIRequest('POST', URL, JsonBody, DocType, DocNo);
         if not ResponseObj.Get('Items', JsonTkn) then
             Error(NoTruckFoundErr, TruckNumber);
@@ -132,7 +132,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('Category', Category);
         JsonBody.Add('Description', Description);
         JsonBody.Add('TruckId', TruckID);
-        URL := StrSubstNo(DeductionURLTok, AlvysSetup."Integration URL", APIVersionTok);
+        URL := AlvysSetup."Integration URL" + 'deductions/once';
         ResponseObj := SendAPIRequest('POST', URL, JsonBody, DocType, DocNo);
         InsertDeduction(ResponseObj, DocType, DocNo, Posted);
     end;
@@ -203,9 +203,16 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     local procedure PrepareHeaders(AccessToken: Text; var RequestHeaders: HttpHeaders; var ContentHeaders: HttpHeaders)
+    var
+        Content: HttpContent;
     begin
         if AccessToken <> '' then
             RequestHeaders.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
+        // Content-Type is a content header, so ContentHeaders has to be bound to an
+        // HttpContent before it will accept it; an unbound HttpHeaders is request-scoped.
+        Content.GetHeaders(ContentHeaders);
+        if ContentHeaders.Contains('Content-Type') then
+            ContentHeaders.Remove('Content-Type');
         ContentHeaders.Add('Content-Type', 'application/json');
     end;
 
@@ -242,9 +249,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         BearerTok: Label 'Bearer %1', Locked = true, Comment = '%1 = Access Token';
         TokenURLLbl: Label 'https://auth.alvys.com/oauth/token', Locked = true;
         AudienceLbl: Label 'https://api.alvys.com/public/', Locked = true;
-        APIVersionTok: Label 'v1', Locked = true;
-        TruckSearchURLTok: Label '%1/api/p/%2/trucks/search', Locked = true, Comment = '%1 = Integration URL, %2 = API Version';
-        DeductionURLTok: Label '%1/api/p/%2/deductions/once', Locked = true, Comment = '%1 = Integration URL, %2 = API Version';
         TokenMissingErr: Label 'access_token not found in response:\%1', Comment = '%1 = Response Text';
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';

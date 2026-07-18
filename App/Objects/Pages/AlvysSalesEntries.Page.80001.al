@@ -42,10 +42,6 @@ page 80801 "BAASI Alvys Sales Entries"
             {
                 ApplicationArea = All;
                 ToolTip = 'Shows the request body that was sent to Alvys.';
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                PromotedOnly = true;
                 Image = ViewDetails;
 
                 trigger OnAction()
@@ -57,16 +53,27 @@ page 80801 "BAASI Alvys Sales Entries"
             {
                 ApplicationArea = All;
                 ToolTip = 'Shows the error message and error stack for the entry.';
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                PromotedOnly = true;
                 Image = ErrorLog;
 
                 trigger OnAction()
                 begin
                     Rec.DisplayErrorMessage();
                 end;
+            }
+        }
+
+        area(Promoted)
+        {
+            group(Category_Process)
+            {
+                Caption = 'Process';
+
+                actionref("Show Request Body_Promoted"; "Show Request Body")
+                {
+                }
+                actionref("Show Error_Promoted"; "Show Error")
+                {
+                }
             }
         }
     }
