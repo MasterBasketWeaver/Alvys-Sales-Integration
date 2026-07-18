@@ -33,11 +33,12 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     procedure GetBearerToken(var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"): Text
     var
+        RequestHeaders, ContentHeaders : HttpHeaders;
         JsonBody, ResponseObj : JsonObject;
         SendTime: DateTime;
         ExpiresIn: Integer;
         ExpiryDuration: Duration;
-        AccessToken, RequestBody, ResponseText : Text;
+        AccessToken, ErrorText, ResponseText : Text;
         Sent: Boolean;
     begin
         AlvysSalesSetup.TestField("Client ID");
@@ -47,14 +48,12 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('client_secret', AlvysSalesSetup."Client Secret");
         JsonBody.Add('audience', AudienceLbl);
         JsonBody.Add('grant_type', 'client_credentials');
-        JsonBody.WriteTo(RequestBody);
-        Sent := SendHttpRequest('POST', TokenURLLbl, RequestBody, '', ResponseText);
-        // request body is not logged, as it contains the client secret
-        InsertEntry(Enum::"Sales Document Type"::Quote, '', TokenURLLbl, 'POST', '', ResponseText, Sent, not Sent);
+        PrepareHeaders('', RequestHeaders, ContentHeaders);
+        // the token request is not logged, as the request body contains the client secret
+        // and the response contains the access token
+        Sent := RESTAPIMgt.TryGetResponseAsJsonObject('POST', TokenURLLbl, JsonBody, RequestHeaders, ContentHeaders, ResponseObj, ResponseText, ErrorText);
         if not Sent then
-            ThrowRequestError(ResponseText);
-        if not ResponseObj.ReadFrom(ResponseText) then
-            Error(UnableToReadResponseErr, ResponseText);
+            Error(ErrorText);
         AccessToken := JsonMgt.GetJsonValueAsText(ResponseObj, 'access_token');
         if AccessToken = '' then
             Error(TokenMissingErr, ResponseText);
@@ -162,7 +161,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         end;
         AlvysDeduction."Truck Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'TruckId'), 1, MaxStrLen(AlvysDeduction."Truck Id"));
         AlvysDeduction.Date := DT2Date(JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'Date'));
-        AlvysDeduction."Is Paid" := GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
+        AlvysDeduction."Is Paid" := JsonMgt.GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
         AlvysDeduction."Created At" := JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'CreatedAt');
         AlvysDeduction."Created By" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'CreatedBy'), 1, MaxStrLen(AlvysDeduction."Created By"));
         AlvysDeduction."Document Type" := DocType;
@@ -188,69 +187,29 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     local procedure SendAPIRequest(Method: Text; URL: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
     var
+        RequestHeaders, ContentHeaders : HttpHeaders;
         ResponseObj: JsonObject;
-        AccessToken, RequestBody, ResponseText : Text;
+        AccessToken, ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
         AccessToken := CheckToGetAccessToken();
         JsonBody.WriteTo(RequestBody);
-        Sent := SendHttpRequest(Method, URL, RequestBody, AccessToken, ResponseText);
-        InsertEntry(DocType, DocNo, URL, Method, RequestBody, ResponseText, Sent, true);
+        PrepareHeaders(AccessToken, RequestHeaders, ContentHeaders);
+        Sent := RESTAPIMgt.TryGetResponseAsJsonObject(Method, URL, JsonBody, RequestHeaders, ContentHeaders, ResponseObj, ResponseText, ErrorText);
+        InsertEntry(DocType, DocNo, URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
         if not Sent then
-            ThrowRequestError(ResponseText);
-        if not ResponseObj.ReadFrom(ResponseText) then
-            Error(UnableToReadResponseErr, ResponseText);
+            Error(ErrorText);
         exit(ResponseObj);
     end;
 
-    local procedure SendHttpRequest(Method: Text; URL: Text; RequestBody: Text; AccessToken: Text; var ResponseText: Text): Boolean
-    var
-        HttpClient: HttpClient;
-        Content: HttpContent;
-        Headers: HttpHeaders;
-        HttpRequestMessage: HttpRequestMessage;
-        HttpResponseMessage: HttpResponseMessage;
+    local procedure PrepareHeaders(AccessToken: Text; var RequestHeaders: HttpHeaders; var ContentHeaders: HttpHeaders)
     begin
-        HttpRequestMessage.SetRequestUri(URL);
-        HttpRequestMessage.Method(Method);
-
-        if (Method <> 'GET') and (RequestBody <> '') then begin
-            Content.WriteFrom(RequestBody);
-            Content.GetHeaders(Headers);
-            if Headers.Contains('Content-Type') then
-                Headers.Remove('Content-Type');
-            Headers.Add('Content-Type', 'application/json');
-            HttpRequestMessage.Content(Content);
-        end;
-
-        if AccessToken <> '' then begin
-            HttpRequestMessage.GetHeaders(Headers);
-            Headers.Add('Authorization', StrSubstNo('Bearer %1', AccessToken));
-        end;
-
-        ClearLastError();
-        if not HttpClient.Send(HttpRequestMessage, HttpResponseMessage) then begin
-            ResponseText := StrSubstNo(UnableToSendRequestErr, GetLastErrorText());
-            exit(false);
-        end;
-
-        HttpResponseMessage.Content().ReadAs(ResponseText);
-        if not HttpResponseMessage.IsSuccessStatusCode() then begin
-            if ResponseText = '' then
-                ResponseText := StrSubstNo('%1 - %2', HttpResponseMessage.HttpStatusCode(), HttpResponseMessage.ReasonPhrase());
-            exit(false);
-        end;
-        exit(true);
+        if AccessToken <> '' then
+            RequestHeaders.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
+        ContentHeaders.Add('Content-Type', 'application/json');
     end;
 
-    local procedure ThrowRequestError(ResponseText: Text)
-    begin
-        if ResponseText <> '' then
-            Error(ResponseText);
-        Error(UnableToSendRequestErr, GetLastErrorText());
-    end;
-
-    local procedure InsertEntry(DocType: Enum "Sales Document Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; Success: Boolean; LogResponse: Boolean)
+    local procedure InsertEntry(DocType: Enum "Sales Document Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
         EntryNo: Integer;
@@ -269,38 +228,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         if LogResponse then
             AlvysEntry.Response := CopyStr(ResponseText, 1, MaxStrLen(AlvysEntry.Response));
         if not Success then begin
-            AlvysEntry."Error Message" := CopyStr(ResponseText, 1, MaxStrLen(AlvysEntry."Error Message"));
+            AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
             AlvysEntry.SetErrorStack(GetLastErrorCallStack());
         end;
         AlvysEntry.Insert(true);
     end;
 
-    local procedure GetJsonValueAsBoolean(var JsonObj: JsonObject; KeyName: Text): Boolean
-    var
-        T: JsonToken;
-        V: JsonValue;
-    begin
-        if not JsonObj.Get(KeyName, T) then
-            exit(false);
-        V := T.AsValue();
-        if V.IsNull() or V.IsUndefined() then
-            exit(false);
-        exit(V.AsBoolean());
-    end;
-
-
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         JsonMgt: Codeunit "BAAPI Json Mgt.";
+        RESTAPIMgt: Codeunit "BAAPI REST API Mgt.";
         LoadedSetup: Boolean;
+        BearerTok: Label 'Bearer %1', Locked = true, Comment = '%1 = Access Token';
         TokenURLLbl: Label 'https://auth.alvys.com/oauth/token', Locked = true;
         AudienceLbl: Label 'https://api.alvys.com/public/', Locked = true;
         APIVersionTok: Label 'v1', Locked = true;
         TruckSearchURLTok: Label '%1/api/p/%2/trucks/search', Locked = true, Comment = '%1 = Integration URL, %2 = API Version';
         DeductionURLTok: Label '%1/api/p/%2/deductions/once', Locked = true, Comment = '%1 = Integration URL, %2 = API Version';
         TokenMissingErr: Label 'access_token not found in response:\%1', Comment = '%1 = Response Text';
-        UnableToReadResponseErr: Label 'Unable to read response:\%1', Comment = '%1 = Response Text';
-        UnableToSendRequestErr: Label 'Unable to send request:\%1', Comment = '%1 = Error Text';
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
