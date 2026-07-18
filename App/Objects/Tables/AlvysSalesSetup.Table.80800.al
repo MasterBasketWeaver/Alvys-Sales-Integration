@@ -25,7 +25,6 @@ table 80800 "BAASI Alvys Sales Setup"
         field(4; "Client Secret"; Text[250])
         {
             DataClassification = CustomerContent;
-            ExtendedDatatype = Masked;
             Tooltip = 'The Client Secret used to authenticate with the Alvys API.';
         }
         field(5; "Access Token"; Blob)

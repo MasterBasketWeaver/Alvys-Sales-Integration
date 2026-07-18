@@ -33,12 +33,13 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     procedure GetBearerToken(var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"): Text
     var
-        RequestHeaders, ContentHeaders : HttpHeaders;
+        RequestHeaders: HttpHeaders;
+        ContentHeaders: HttpHeaders;
         JsonBody, ResponseObj : JsonObject;
         SendTime: DateTime;
         ExpiresIn: Integer;
         ExpiryDuration: Duration;
-        AccessToken, ErrorText, ResponseText : Text;
+        AccessToken, ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
         AlvysSalesSetup.TestField("Client ID");
@@ -48,10 +49,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('client_secret', AlvysSalesSetup."Client Secret");
         JsonBody.Add('audience', AudienceLbl);
         JsonBody.Add('grant_type', 'client_credentials');
-        PrepareHeaders('', RequestHeaders, ContentHeaders);
+        JsonBody.WriteTo(RequestBody);
         // the token request is not logged, as the request body contains the client secret
         // and the response contains the access token
-        Sent := RESTAPIMgt.TryGetResponseAsJsonObject('POST', TokenURLLbl, JsonBody, RequestHeaders, ContentHeaders, ResponseObj, ResponseText, ErrorText);
+        Sent := SendHttpRequest('POST', TokenURLLbl, 'application/json', '', RequestBody, ResponseObj, ResponseText, ErrorText);
         if not Sent then
             Error(ErrorText);
         AccessToken := JsonMgt.GetJsonValueAsText(ResponseObj, 'access_token');
@@ -67,16 +68,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
     procedure GetTruckID(TruckNumber: Text): Text
+    var
+        JsonBody, ResponseObj : JsonObject;
     begin
-        exit(GetTruckID(TruckNumber, Enum::"Sales Document Type"::Quote, ''));
+        PrepareTruckSearchBody(TruckNumber, JsonBody);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody);
+        exit(ExtractTruckID(ResponseObj, TruckNumber));
     end;
 
     procedure GetTruckID(TruckNumber: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]): Text
     var
-        JsonBody, ResponseObj, ItemObj : JsonObject;
-        ItemsArray: JsonArray;
-        JsonTkn: JsonToken;
-        TruckID, URL : Text;
+        JsonBody, ResponseObj : JsonObject;
+    begin
+        PrepareTruckSearchBody(TruckNumber, JsonBody);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody, DocType, DocNo);
+        exit(ExtractTruckID(ResponseObj, TruckNumber));
+    end;
+
+    local procedure PrepareTruckSearchBody(TruckNumber: Text; var JsonBody: JsonObject)
     begin
         GetAndCheckSetup();
         if TruckNumber = '' then
@@ -84,8 +93,15 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('Page', 1);
         JsonBody.Add('PageSize', 100);
         JsonBody.Add('TruckNumber', TruckNumber);
-        URL := AlvysSetup."Integration URL" + 'trucks/search';
-        ResponseObj := SendAPIRequest('POST', URL, JsonBody, DocType, DocNo);
+    end;
+
+    local procedure ExtractTruckID(var ResponseObj: JsonObject; TruckNumber: Text): Text
+    var
+        ItemObj: JsonObject;
+        ItemsArray: JsonArray;
+        JsonTkn: JsonToken;
+        TruckID: Text;
+    begin
         if not ResponseObj.Get('Items', JsonTkn) then
             Error(NoTruckFoundErr, TruckNumber);
         ItemsArray := JsonTkn.AsArray();
@@ -100,44 +116,110 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
 
-    procedure CreateDeduction(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text)
+    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     begin
-        CreateDeduction(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Quote, '', false);
+        exit(CreateDeductionForAsset(TruckIdTok, TruckID, Date, Amount, Category, Description));
     end;
 
-    procedure CreateDeduction(var SalesHeader: Record "Sales Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
+    procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
     var
         TruckID: Text;
     begin
         TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.");
-        CreateDeduction(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", false);
+        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", false);
     end;
 
-    procedure CreateDeduction(var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
+    procedure CreateDeductionForTruck(var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
     var
         TruckID: Text;
     begin
         TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), Enum::"Sales Document Type"::Invoice, SalesInvHeader."No.");
-        CreateDeduction(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Invoice, SalesInvHeader."No.", true);
+        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Invoice, SalesInvHeader."No.", true);
     end;
 
-    procedure CreateDeduction(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean)
+    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    begin
+        exit(CreateDeductionForAsset(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+    end;
+
+    procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
+    begin
+        exit(CreateDeductionForAsset(DriverIdTok, DriverID, Date, Amount, Category, Description));
+    end;
+
+    procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    begin
+        exit(CreateDeductionForAsset(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+    end;
+
+    /// <summary>
+    /// Shared create-deduction core. Alvys treats DriverId and TruckId as mutually exclusive, so
+    /// exactly one of them is written to the body, named by AssetIdFieldName. Returns the Id of the
+    /// deduction Alvys created.
+    /// </summary>
+    local procedure CreateDeductionForAsset(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     var
         JsonBody, ResponseObj : JsonObject;
-        URL: Text;
+    begin
+        PrepareDeductionBody(AssetIdFieldName, AssetID, Date, Amount, Category, Description, JsonBody);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody);
+        exit(InsertDeduction(ResponseObj));
+    end;
+
+    local procedure CreateDeductionForAsset(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    var
+        JsonBody, ResponseObj : JsonObject;
+    begin
+        PrepareDeductionBody(AssetIdFieldName, AssetID, Date, Amount, Category, Description, JsonBody);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, DocType, DocNo);
+        exit(InsertDeduction(ResponseObj, DocType, DocNo, Posted));
+    end;
+
+    local procedure PrepareDeductionBody(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; var JsonBody: JsonObject)
     begin
         GetAndCheckSetup();
+        if AssetID = '' then
+            Error(MissingAssetIDErr, AssetIdFieldName);
         JsonBody.Add('Date', Format(Date, 0, '<Year4>-<Month,2>-<Day,2>'));
         JsonBody.Add('Amount', Amount);
         JsonBody.Add('Category', Category);
         JsonBody.Add('Description', Description);
-        JsonBody.Add('TruckId', TruckID);
-        URL := AlvysSetup."Integration URL" + 'deductions/once';
-        ResponseObj := SendAPIRequest('POST', URL, JsonBody, DocType, DocNo);
-        InsertDeduction(ResponseObj, DocType, DocNo, Posted);
+        JsonBody.Add(AssetIdFieldName, AssetID);
     end;
 
-    local procedure InsertDeduction(var ResponseObj: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean)
+
+    /// <summary>
+    /// Reads a single deduction back from Alvys by its Id. The response is returned as-is rather
+    /// than inserted, so that re-reading a deduction does not duplicate the logged entry.
+    /// </summary>
+    procedure GetDeduction(DeductionID: Text): JsonObject
+    var
+        JsonBody: JsonObject;
+    begin
+        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody));
+    end;
+
+    procedure GetDeduction(DeductionID: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
+    var
+        JsonBody: JsonObject;
+    begin
+        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, DocType, DocNo));
+    end;
+
+    local procedure GetDeductionURL(DeductionID: Text): Text
+    begin
+        GetAndCheckSetup();
+        if DeductionID = '' then
+            Error(MissingDeductionIDErr);
+        exit(AlvysSetup."Integration URL" + 'deductions/' + DeductionID);
+    end;
+
+    local procedure InsertDeduction(var ResponseObj: JsonObject): Text
+    begin
+        exit(InsertDeduction(ResponseObj, NoDocumentType(), '', false));
+    end;
+
+    local procedure InsertDeduction(var ResponseObj: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
         AmountObj: JsonObject;
@@ -160,6 +242,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             AlvysDeduction."Currency Code" := JsonMgt.GetJsonValueAsInteger(AmountObj, 'Currency');
         end;
         AlvysDeduction."Truck Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'TruckId'), 1, MaxStrLen(AlvysDeduction."Truck Id"));
+        AlvysDeduction."Driver Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'DriverId'), 1, MaxStrLen(AlvysDeduction."Driver Id"));
         AlvysDeduction.Date := DT2Date(JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'Date'));
         AlvysDeduction."Is Paid" := JsonMgt.GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
         AlvysDeduction."Created At" := JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'CreatedAt');
@@ -168,6 +251,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysDeduction."Document No." := DocNo;
         AlvysDeduction.Posted := Posted;
         AlvysDeduction.Insert(true);
+        exit(AlvysDeduction.Id);
     end;
 
 
@@ -185,35 +269,112 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
 
-    local procedure SendAPIRequest(Method: Text; URL: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject): JsonObject
     var
-        RequestHeaders, ContentHeaders : HttpHeaders;
         ResponseObj: JsonObject;
-        AccessToken, ErrorText, RequestBody, ResponseText : Text;
+        ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
-        AccessToken := CheckToGetAccessToken();
-        JsonBody.WriteTo(RequestBody);
-        PrepareHeaders(AccessToken, RequestHeaders, ContentHeaders);
-        Sent := RESTAPIMgt.TryGetResponseAsJsonObject(Method, URL, JsonBody, RequestHeaders, ContentHeaders, ResponseObj, ResponseText, ErrorText);
+        Sent := SendAndParse(Method, URL, ContentType, JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText);
+        InsertEntry(URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
+        if not Sent then
+            Error(ErrorText);
+        exit(ResponseObj);
+    end;
+
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
+    var
+        ResponseObj: JsonObject;
+        ErrorText, RequestBody, ResponseText : Text;
+        Sent: Boolean;
+    begin
+        Sent := SendAndParse(Method, URL, ContentType, JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText);
         InsertEntry(DocType, DocNo, URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
         if not Sent then
             Error(ErrorText);
         exit(ResponseObj);
     end;
 
-    local procedure PrepareHeaders(AccessToken: Text; var RequestHeaders: HttpHeaders; var ContentHeaders: HttpHeaders)
-    var
-        Content: HttpContent;
+    /// <summary>
+    /// Authenticates and sends the request. Never raises; the caller logs the outcome and decides
+    /// whether to surface ErrorText as an error.
+    /// </summary>
+    local procedure SendAndParse(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; var ResponseObj: JsonObject; var RequestBody: Text; var ResponseText: Text; var ErrorText: Text): Boolean
     begin
+        if JsonBody.Keys().Count() > 0 then
+            JsonBody.WriteTo(RequestBody);
+        exit(SendHttpRequest(Method, URL, ContentType, CheckToGetAccessToken(), RequestBody, ResponseObj, ResponseText, ErrorText));
+    end;
+
+    /// <summary>
+    /// Builds and sends the request directly rather than going through the shared REST codeunit.
+    /// That codeunit stages headers on caller-supplied HttpHeaders and copies them across with
+    /// GetValues/Get(1), but two staged HttpHeaders share one value pool, so Content-Type gets
+    /// handed the Authorization value and BC rejects the request. Setting the headers straight on
+    /// the request message and its content avoids the staging step entirely.
+    /// Never raises; failures are reported through ErrorText.
+    /// </summary>
+    local procedure SendHttpRequest(Method: Text; URL: Text; ContentType: Text; AccessToken: Text; RequestBody: Text; var ResponseObj: JsonObject; var ResponseText: Text; var ErrorText: Text): Boolean
+    var
+        Client: HttpClient;
+        Content: HttpContent;
+        RequestMsg: HttpRequestMessage;
+        ResponseMsg: HttpResponseMessage;
+        ContentHeaders: HttpHeaders;
+        RequestHeaders: HttpHeaders;
+    begin
+        Clear(ResponseObj);
+        ErrorText := '';
+        ResponseText := '';
+        RequestMsg.SetRequestUri(URL);
+        RequestMsg.Method(Method);
+        RequestMsg.GetHeaders(RequestHeaders);
         if AccessToken <> '' then
             RequestHeaders.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
-        // Content-Type is a content header, so ContentHeaders has to be bound to an
-        // HttpContent before it will accept it; an unbound HttpHeaders is request-scoped.
-        Content.GetHeaders(ContentHeaders);
-        if ContentHeaders.Contains('Content-Type') then
-            ContentHeaders.Remove('Content-Type');
-        ContentHeaders.Add('Content-Type', 'application/json');
+        RequestHeaders.Add('Accept', 'application/json');
+        if RequestBody <> '' then begin
+            Content.WriteFrom(RequestBody);
+            // content headers must be set before the content is assigned: assigning copies it
+            Content.GetHeaders(ContentHeaders);
+            if ContentHeaders.Contains('Content-Type') then
+                ContentHeaders.Remove('Content-Type');
+            ContentHeaders.Add('Content-Type', ContentType);
+            RequestMsg.Content(Content);
+        end;
+        if not Client.Send(RequestMsg, ResponseMsg) then begin
+            ErrorText := StrSubstNo(UnableToSendErr, GetLastErrorText());
+            exit(false);
+        end;
+        ResponseMsg.Content().ReadAs(ResponseText);
+        if not ResponseMsg.IsSuccessStatusCode() then begin
+            if ResponseText = '' then
+                ResponseText := StrSubstNo('%1 - %2', ResponseMsg.HttpStatusCode(), ResponseMsg.ReasonPhrase());
+            ErrorText := ResponseText;
+            exit(false);
+        end;
+        if not ResponseObj.ReadFrom(ResponseText) then begin
+            ErrorText := StrSubstNo(UnableToReadErr, ResponseText);
+            exit(false);
+        end;
+        exit(true);
+    end;
+
+    /// <summary>
+    /// The placeholder Document Type stored for calls that have no sales document behind them.
+    /// Kept in one place so the choice of placeholder is not spread across call sites.
+    /// </summary>
+    local procedure NoDocumentType(): Enum "Sales Document Type"
+    begin
+        exit(Enum::"Sales Document Type"::Quote);
+    end;
+
+    /// <summary>
+    /// Logs a call that is not tied to a sales document. Such calls are recorded against the
+    /// no-document placeholder, so the Document No. on the entry stays blank.
+    /// </summary>
+    local procedure InsertEntry(URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
+    begin
+        InsertEntry(NoDocumentType(), '', URL, Method, RequestBody, ResponseText, ErrorText, Success, LogResponse);
     end;
 
     local procedure InsertEntry(DocType: Enum "Sales Document Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
@@ -244,13 +405,18 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         JsonMgt: Codeunit "BAAPI Json Mgt.";
-        RESTAPIMgt: Codeunit "BAAPI REST API Mgt.";
         LoadedSetup: Boolean;
         BearerTok: Label 'Bearer %1', Locked = true, Comment = '%1 = Access Token';
         TokenURLLbl: Label 'https://auth.alvys.com/oauth/token', Locked = true;
         AudienceLbl: Label 'https://api.alvys.com/public/', Locked = true;
         TokenMissingErr: Label 'access_token not found in response:\%1', Comment = '%1 = Response Text';
+        UnableToSendErr: Label 'Unable to send request:\%1', Comment = '%1 = Error Text';
+        UnableToReadErr: Label 'Unable to read response:\%1', Comment = '%1 = Response Text';
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';
+        TruckIdTok: Label 'TruckId', Locked = true;
+        DriverIdTok: Label 'DriverId', Locked = true;
+        MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
+        MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
 }

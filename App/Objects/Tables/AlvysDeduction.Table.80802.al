@@ -73,6 +73,11 @@ table 80802 "BAASI Alvys Deduction"
             DataClassification = CustomerContent;
             Editable = false;
         }
+        field(14; "Driver Id"; Text[50])
+        {
+            DataClassification = CustomerContent;
+            Editable = false;
+        }
         field(20; "Document Type"; Enum "Sales Document Type")
         {
             DataClassification = CustomerContent;
