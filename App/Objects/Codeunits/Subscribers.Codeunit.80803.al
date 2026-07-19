@@ -9,12 +9,11 @@ codeunit 80803 "BAASI Subscribers"
     begin
         AlvysDeduction.SetRange("Document Type", SalesHeader."Document Type");
         AlvysDeduction.SetRange("Document No.", SalesHeader."No.");
-        AlvysDeduction.SetRange(Posted, false);
-        while AlvysDeduction.FindFirst() do begin
-            AlvysDeduction."Document Type" := AlvysDeduction."Document Type"::Invoice;
-            AlvysDeduction."Document No." := SalesInvHeader."No.";
-            AlvysDeduction.Posted := true;
-            AlvysDeduction.Modify(true);
-        end;
+        AlvysDeduction.SetRange("Posted Document No.", '');
+        if AlvysDeduction.FindSet() then
+            repeat
+                AlvysDeduction."Posted Document No." := SalesInvHeader."No.";
+                AlvysDeduction.Modify(true);
+            until AlvysDeduction.Next() = 0;
     end;
 }

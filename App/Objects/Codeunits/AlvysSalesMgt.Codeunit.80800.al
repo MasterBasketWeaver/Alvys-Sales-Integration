@@ -76,12 +76,12 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(ExtractTruckID(ResponseObj, TruckNumber));
     end;
 
-    procedure GetTruckID(TruckNumber: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]): Text
+    procedure GetTruckID(TruckNumber: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     var
         JsonBody, ResponseObj : JsonObject;
     begin
         PrepareTruckSearchBody(TruckNumber, JsonBody);
-        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody, DocType, DocNo);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody, DocType, DocNo, PostedDocNo);
         exit(ExtractTruckID(ResponseObj, TruckNumber));
     end;
 
@@ -126,21 +126,21 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         TruckID: Text;
     begin
-        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.");
-        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", false);
+        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.", '');
+        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", '');
     end;
 
     procedure CreateDeductionForTruck(var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
     var
         TruckID: Text;
     begin
-        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), Enum::"Sales Document Type"::Invoice, SalesInvHeader."No.");
-        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Invoice, SalesInvHeader."No.", true);
+        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), Enum::"Sales Document Type"::Invoice, '', SalesInvHeader."No.");
+        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Invoice, '', SalesInvHeader."No.");
     end;
 
-    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     begin
-        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo));
     end;
 
     procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
@@ -148,9 +148,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description));
     end;
 
-    procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     begin
-        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, Posted));
+        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo));
     end;
 
     /// <summary>
@@ -167,13 +167,13 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(InsertDeduction(ResponseObj));
     end;
 
-    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     var
         JsonBody, ResponseObj : JsonObject;
     begin
         PrepareDeductionBody(AssetIdFieldName, AssetID, Date, Amount, Category, Description, JsonBody);
-        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, DocType, DocNo);
-        exit(InsertDeduction(ResponseObj, DocType, DocNo, Posted));
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, DocType, DocNo, PostedDocNo);
+        exit(InsertDeduction(ResponseObj, DocType, DocNo, PostedDocNo));
     end;
 
     local procedure PrepareDeductionBody(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; var JsonBody: JsonObject)
@@ -200,11 +200,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody));
     end;
 
-    procedure GetDeduction(DeductionID: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
+    procedure GetDeduction(DeductionID: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): JsonObject
     var
         JsonBody: JsonObject;
     begin
-        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, DocType, DocNo));
+        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, DocType, DocNo, PostedDocNo));
     end;
 
     local procedure GetDeductionURL(DeductionID: Text): Text
@@ -217,10 +217,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     local procedure InsertDeduction(var ResponseObj: JsonObject): Text
     begin
-        exit(InsertDeduction(ResponseObj, NoDocumentType(), '', false));
+        exit(InsertDeduction(ResponseObj, NoDocumentType(), '', ''));
     end;
 
-    local procedure InsertDeduction(var ResponseObj: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; Posted: Boolean): Text
+    local procedure InsertDeduction(var ResponseObj: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
         AmountObj: JsonObject;
@@ -250,7 +250,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysDeduction."Created By" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'CreatedBy'), 1, MaxStrLen(AlvysDeduction."Created By"));
         AlvysDeduction."Document Type" := DocType;
         AlvysDeduction."Document No." := DocNo;
-        AlvysDeduction.Posted := Posted;
+        AlvysDeduction."Posted Document No." := PostedDocNo;
         AlvysDeduction.Insert(true);
         exit(AlvysDeduction.Id);
     end;
@@ -283,14 +283,14 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(ResponseObj);
     end;
 
-    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]): JsonObject
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): JsonObject
     var
         ResponseObj: JsonObject;
         ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
         Sent := SendAndParse(Method, URL, ContentType, JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText);
-        InsertEntry(DocType, DocNo, URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
+        InsertEntry(MapDocumentType(DocType, PostedDocNo), EntryDocumentNo(DocNo, PostedDocNo), URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
         if not Sent then
             Error(ErrorText);
         exit(ResponseObj);
@@ -328,15 +328,45 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
+    /// Translates the sales document type into the type stored on the entry. A non-blank
+    /// PostedDocNo means the call came from a posted invoice and outranks DocType. Otherwise only
+    /// orders and invoices are logged against a document; anything else has no counterpart in Alvys.
+    /// </summary>
+    local procedure MapDocumentType(DocType: Enum "Sales Document Type"; PostedDocNo: Code[20]): Enum "BAASI Alvys Entry Doc. Type"
+    begin
+        if PostedDocNo <> '' then
+            exit(Enum::"BAASI Alvys Entry Doc. Type"::"Posted Sales Invoice");
+        case DocType of
+            DocType::Order:
+                exit(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Order");
+            DocType::Invoice:
+                exit(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Invoice");
+            else
+                Error(UnsupportedDocTypeErr, DocType);
+        end;
+    end;
+
+    /// <summary>
+    /// The document number stored on the entry: the posted invoice number once one exists,
+    /// otherwise the number of the document the call originated from.
+    /// </summary>
+    local procedure EntryDocumentNo(DocNo: Code[20]; PostedDocNo: Code[20]): Code[20]
+    begin
+        if PostedDocNo <> '' then
+            exit(PostedDocNo);
+        exit(DocNo);
+    end;
+
+    /// <summary>
     /// Logs a call that is not tied to a sales document. Such calls are recorded against the
-    /// no-document placeholder, so the Document No. on the entry stays blank.
+    /// blank document type, so the Document No. on the entry stays blank.
     /// </summary>
     local procedure InsertEntry(URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     begin
-        InsertEntry(NoDocumentType(), '', URL, Method, RequestBody, ResponseText, ErrorText, Success, LogResponse);
+        InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, Method, RequestBody, ResponseText, ErrorText, Success, LogResponse);
     end;
 
-    local procedure InsertEntry(DocType: Enum "Sales Document Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
+    local procedure InsertEntry(DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
         GLEntry: Record "G/L Entry";
@@ -378,4 +408,5 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
+        UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
 }

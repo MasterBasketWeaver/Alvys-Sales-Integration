@@ -31,7 +31,7 @@ page 80802 "BAASI Alvys Deductions"
                 field("Created By"; Rec."Created By") { }
                 field("Document Type"; Rec."Document Type") { }
                 field("Document No."; Rec."Document No.") { }
-                field(Posted; Rec.Posted) { }
+                field("Posted Document No."; Rec."Posted Document No.") { }
             }
         }
     }

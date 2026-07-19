@@ -88,11 +88,11 @@ table 80802 "BAASI Alvys Deduction"
             DataClassification = CustomerContent;
             Editable = false;
         }
-        field(22; Posted; Boolean)
+        field(23; "Posted Document No."; Code[20])
         {
             DataClassification = CustomerContent;
             Editable = false;
-            Tooltip = 'If enabled, the deduction is linked to a posted Sales Invoice.';
+            Tooltip = 'The number of the posted Sales Invoice the deduction ended up on. Blank while the originating document is still unposted.';
         }
     }
 
@@ -102,6 +102,6 @@ table 80802 "BAASI Alvys Deduction"
         {
             Clustered = true;
         }
-        key(Document; "Document Type", "Document No.", Posted) { }
+        key(Document; "Document Type", "Document No.", "Posted Document No.") { }
     }
 }
