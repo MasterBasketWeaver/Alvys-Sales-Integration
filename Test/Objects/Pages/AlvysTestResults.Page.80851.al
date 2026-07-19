@@ -78,23 +78,19 @@ page 80851 "BAASIT Alvys Test Results"
     end;
 
     /// <summary>
-    /// Runs the suite from a clean result log. The commit is required because a test runner cannot
-    /// start inside the write transaction opened by deleting the previous results.
+    /// Runs the suite through the shared run codeunit, so a run started here is identical to one
+    /// triggered over the API, then reports the summary it recorded.
     /// </summary>
     local procedure RunTestSuite()
     var
-        SuccessCount, FailureCount : Integer;
+        TestRun: Record "BAASIT Test Run";
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
     begin
-        Rec.DeleteAll();
-        Commit();
-
-        Codeunit.Run(Codeunit::"BAASIT Alvys Test Runner");
-
-        SuccessCount := Rec.CountByOutcome(Rec.Outcome::Success);
-        FailureCount := Rec.CountByOutcome(Rec.Outcome::Failure);
+        TestRunMgt.RunSuite();
+        TestRun.GetSingleton();
 
         CurrPage.Update(false);
-        Message(this.RunFinishedMsg, SuccessCount + FailureCount, SuccessCount, FailureCount);
+        Message(this.RunFinishedMsg, TestRun."Tests Run", TestRun.Successful, TestRun.Failed);
     end;
 
     var

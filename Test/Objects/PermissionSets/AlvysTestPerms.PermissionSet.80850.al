@@ -3,8 +3,13 @@ permissionset 80850 "BAASIT Test Perms."
     Caption = 'Alvys Sales Integration Test Permissions';
     Assignable = true;
     Permissions = tabledata "BAASIT Test Result" = RIMD,
+        tabledata "BAASIT Test Run" = RIMD,
         table "BAASIT Test Result" = X,
+        table "BAASIT Test Run" = X,
         page "BAASIT Alvys Test Results" = X,
+        page "BAASIT Alvys Test Run API" = X,
+        page "BAASIT Alvys Test Result API" = X,
         codeunit "BAASIT Alvys Sales Tests" = X,
-        codeunit "BAASIT Alvys Test Runner" = X;
+        codeunit "BAASIT Alvys Test Runner" = X,
+        codeunit "BAASIT Test Run Mgt." = X;
 }
