@@ -90,7 +90,8 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         GetAndCheckSetup();
         if TruckNumber = '' then
             Error(MissingTruckNumberErr);
-        JsonBody.Add('Page', 1);
+        // Alvys pages are 0-indexed: asking for page 1 skips the only page of results and 404s.
+        JsonBody.Add('Page', 0);
         JsonBody.Add('PageSize', 100);
         JsonBody.Add('TruckNumber', TruckNumber);
     end;

@@ -1,0 +1,47 @@
+{
+  "id": "fdd85218-81ca-42d0-89af-afae1465ec50",
+  "name": "Alvys Sales Integration Tests",
+  "description": "Automated tests for the Alvys Sales Integration app.",
+  "publisher": "BryanA BC Developments Inc.",
+  "logo": "./Logo/BryanALogo.jpg",
+  "version": "27.0.1.0",
+  "runtime": "16.0",
+  "target": "Cloud",
+  "application": "27.0.0.0",
+  "platform": "27.0.0.0",
+  "resourceExposurePolicy": {
+    "allowDebugging": false,
+    "allowDownloadingSource": false,
+    "includeSourceInSymbolFile": false,
+    "applyToDevExtension": false
+  },
+  "features": [
+    "NoImplicitWith"
+  ],
+  "dependencies": [
+    {
+      "id": "9bc72196-0cd1-ab62-adc1-cc823016a988",
+      "name": "Alvys Sales Integration",
+      "publisher": "BryanA BC Developments Inc.",
+      "version": "27.0.1.0"
+    },
+    {
+      "id": "9bc72196-0cd1-ab62-adc1-cc823016abed",
+      "name": "Rest API functionality",
+      "publisher": "BryanA BC Developments Inc.",
+      "version": "27.0.1.0"
+    },
+    {
+      "id": "dd0be2ea-f733-4d65-bb34-a28f4624fb14",
+      "name": "Library Assert",
+      "publisher": "Microsoft",
+      "version": "27.0.0.0"
+    }
+  ],
+  "idRanges": [
+    {
+      "from": 80850,
+      "to": 80899
+    }
+  ]
+}
