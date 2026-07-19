@@ -17,7 +17,7 @@ table 80801 "BAASI Alvys Sales Entry"
             DataClassification = CustomerContent;
             Editable = false;
         }
-        field(3; "Document Type"; Enum "Sales Document Type")
+        field(3; "Document Type"; Enum "BAASI Alvys Entry Doc. Type")
         {
             DataClassification = CustomerContent;
             Editable = false;

@@ -339,6 +339,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     local procedure InsertEntry(DocType: Enum "Sales Document Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
+        GLEntry: Record "G/L Entry";
         EntryNo: Integer;
     begin
         AlvysEntry.LockTable(true);
