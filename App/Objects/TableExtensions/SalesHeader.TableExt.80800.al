@@ -6,7 +6,7 @@ tableextension 80800 "BAASI Sales Header" extends "Sales Header"
         {
             Caption = 'Has Alvys Deductions';
             FieldClass = FlowField;
-            CalcFormula = exist("BAASI Alvys Deduction" where("Document Type" = field("Document Type"), "Document No." = field("No."), "Posted Document No." = const('')));
+            CalcFormula = exist("BAASI Alvys Deduction" where("Document Type" = field("Document Type"), "Document No." = field("No.")));
             Editable = false;
             Tooltip = 'If enabled, one or more Alvys deductions exist for the document.';
         }

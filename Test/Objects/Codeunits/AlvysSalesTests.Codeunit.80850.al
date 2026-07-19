@@ -119,6 +119,64 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     end;
 
     [Test]
+    procedure CreateDeductionForTruckFromPostedInvoiceLinksBothDocuments()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SalesHeader: Record "Sales Header";
+        SalesInvHeader: Record "Sales Invoice Header";
+        DeductionID: Text;
+    begin
+        // [SCENARIO] The deduction created for a posted invoice resolves its truck from the invoice
+        // dimension and is logged against both the order it posted from and the posted invoice.
+        Initialize();
+
+        // [GIVEN] An order and the invoice it posted to, carrying the tractor code of truck number 1
+        SalesHeader."Document Type" := SalesHeader."Document Type"::Order;
+        SalesHeader."No." := 'ALVYS-TEST-ORD';
+        SalesInvHeader."No." := 'ALVYS-TEST-INV';
+        SalesInvHeader."Dimension Set ID" := TractorCodeDimensionSetID('1');
+
+        // [WHEN] A deduction is created for the posted invoice
+        DeductionID := AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - posted invoice deduction');
+
+        // [THEN] The deduction is created against the truck the dimension resolves to
+        Assert.AreNotEqual('', DeductionID, 'CreateDeductionForTruck should return the Alvys deduction Id.');
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionID, 1, MaxStrLen(AlvysDeduction.Id)));
+        Assert.IsTrue(AlvysDeduction.FindLast(), 'The created deduction should be logged in the Alvys Deduction table.');
+        Assert.AreEqual('TR2516627931370728085', AlvysDeduction."Truck Id", 'The truck should be resolved from the tractor code dimension on the posted invoice.');
+        Assert.AreEqual(-4.5, AlvysDeduction.Amount, 'The logged deduction should carry the requested amount.');
+
+        // [THEN] Both the originating document and the posted invoice are recorded on it
+        Assert.AreEqual(SalesHeader."Document Type"::Order, AlvysDeduction."Document Type", 'The deduction should carry the document type it was posted from.');
+        Assert.AreEqual('ALVYS-TEST-ORD', AlvysDeduction."Document No.", 'The deduction should carry the number of the document it was posted from.');
+        Assert.AreEqual('ALVYS-TEST-INV', AlvysDeduction."Posted Document No.", 'The deduction should carry the posted invoice number.');
+    end;
+
+    [Test]
+    procedure CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails()
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        SalesHeader: Record "Sales Header";
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        // [SCENARIO] A posted invoice without the tractor code dimension has no truck to deduct from.
+        Initialize();
+
+        // [GIVEN] An order and an invoice whose dimension set does not hold the tractor code
+        SalesHeader."Document Type" := SalesHeader."Document Type"::Order;
+        SalesHeader."No." := 'ALVYS-TEST-ORD';
+        SalesInvHeader."No." := 'ALVYS-TEST-INV';
+        SalesInvHeader."Dimension Set ID" := 0;
+
+        // [WHEN] A deduction is created for the posted invoice
+        asserterror AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - no tractor code');
+
+        // [THEN] The call is rejected before it reaches Alvys
+        AlvysSetup.Get();
+        Assert.ExpectedError(StrSubstNo('The document does not have a value for the %1 dimension.', AlvysSetup."Tractor Code Dimension"));
+    end;
+
+    [Test]
     procedure CreateDeductionWithBlankAssetIDFails()
     begin
         // [SCENARIO] A deduction cannot be created without a truck or driver Id.
@@ -189,6 +247,35 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         AlvysSetup.Modify();
 
         Clear(AlvysSalesMgt);
+    end;
+
+    /// <summary>
+    /// Builds a dimension set holding the tractor code dimension set up for the integration, so a
+    /// document can be pointed at a truck without a posted document existing. The dimension value is
+    /// created if the company does not already have one; test isolation rolls it back afterwards.
+    /// </summary>
+    local procedure TractorCodeDimensionSetID(TractorCode: Code[20]): Integer
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        DimValue: Record "Dimension Value";
+        TempDimSetEntry: Record "Dimension Set Entry" temporary;
+        DimMgt: Codeunit DimensionManagement;
+    begin
+        AlvysSetup.Get();
+        AlvysSetup.TestField("Tractor Code Dimension");
+        if not DimValue.Get(AlvysSetup."Tractor Code Dimension", TractorCode) then begin
+            DimValue.Init();
+            DimValue.Validate("Dimension Code", AlvysSetup."Tractor Code Dimension");
+            DimValue.Validate(Code, TractorCode);
+            DimValue.Insert(true);
+        end;
+
+        TempDimSetEntry.Init();
+        TempDimSetEntry."Dimension Code" := DimValue."Dimension Code";
+        TempDimSetEntry."Dimension Value Code" := DimValue.Code;
+        TempDimSetEntry."Dimension Value ID" := DimValue."Dimension Value ID";
+        TempDimSetEntry.Insert();
+        exit(DimMgt.GetDimensionSetID(TempDimSetEntry));
     end;
 
     var

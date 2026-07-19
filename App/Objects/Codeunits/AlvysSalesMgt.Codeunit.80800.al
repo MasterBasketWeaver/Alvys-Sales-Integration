@@ -122,20 +122,17 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description));
     end;
 
-    procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
+    /// <summary>
+    /// Creates a deduction for the truck on a posted sales document. Both headers are needed: the
+    /// truck and the dimension come off the posted invoice, while the sales header is what says
+    /// which document the invoice was posted from, so the deduction can be traced back to it.
+    /// </summary>
+    procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
     var
         TruckID: Text;
     begin
-        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.", '');
-        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", '');
-    end;
-
-    procedure CreateDeductionForTruck(var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text)
-    var
-        TruckID: Text;
-    begin
-        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), Enum::"Sales Document Type"::Invoice, '', SalesInvHeader."No.");
-        CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, Enum::"Sales Document Type"::Invoice, '', SalesInvHeader."No.");
+        TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No.");
+        exit(CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No."));
     end;
 
     procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
