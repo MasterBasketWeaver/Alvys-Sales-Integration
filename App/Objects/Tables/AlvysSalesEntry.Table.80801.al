@@ -45,6 +45,11 @@ table 80801 "BAASI Alvys Sales Entry"
             FieldClass = FlowField;
             CalcFormula = Lookup(User."User Name" where("User Security ID" = field(SystemCreatedBy)));
         }
+        field(12; Direction; Enum "BAASI Alvys Entry Direction")
+        {
+            Editable = false;
+            Tooltip = 'Whether the entry logs a request Business Central sent to Alvys, or one Alvys sent to Business Central.';
+        }
     }
 
     keys
@@ -53,6 +58,7 @@ table 80801 "BAASI Alvys Sales Entry"
         {
             Clustered = true;
         }
+        key(K1; Direction) { }
     }
 
 

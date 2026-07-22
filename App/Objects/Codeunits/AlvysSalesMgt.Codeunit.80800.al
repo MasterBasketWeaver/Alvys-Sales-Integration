@@ -408,6 +408,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, Method, RequestBody, ResponseText, ErrorText, Success, LogResponse);
     end;
 
+    /// <summary>
+    /// Fills in the parts of an inbound entry the caller cannot supply: Alvys posts the payload to
+    /// the API page, so it has no way to number the entry or to mark which way the call went.
+    /// Called from the page's insert trigger, before the record reaches the table.
+    /// </summary>
+    internal procedure PrepareInboundEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; RequestBody: Text)
+    var
+        LastEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        LastEntry.LockTable(true);
+        if LastEntry.FindLast() then
+            AlvysEntry."Entry No." := LastEntry."Entry No." + 1
+        else
+            AlvysEntry."Entry No." := 1;
+        AlvysEntry.Direction := AlvysEntry.Direction::Inbound;
+        AlvysEntry.SetRequestBody(RequestBody);
+    end;
+
     local procedure InsertEntry(DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
@@ -419,6 +437,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             EntryNo := AlvysEntry."Entry No.";
         AlvysEntry.Init();
         AlvysEntry."Entry No." := EntryNo + 1;
+        AlvysEntry.Direction := AlvysEntry.Direction::Outbound;
         AlvysEntry."Document Type" := DocType;
         AlvysEntry."Document No." := DocNo;
         AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));

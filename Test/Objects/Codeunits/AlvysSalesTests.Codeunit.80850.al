@@ -276,6 +276,116 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Assert.ExpectedError('The deduction Id cannot be blank.');
     end;
 
+    [Test]
+    procedure InboundAPIPageLogsEntryAsInbound()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        RequestBody: Text;
+    begin
+        // [SCENARIO] A driver pay call from Alvys is logged to the entry table as an inbound entry.
+        Initialize();
+        RequestBody := DriverPayPayload();
+
+        // [WHEN] Alvys posts a driver pay payload to the API page
+        InsertInboundEntry('PS-INV101026', RequestBody, AlvysEntry);
+
+        // [THEN] The entry is logged against the inbound direction, with the payload kept intact
+        Assert.AreEqual(AlvysEntry.Direction::Inbound, AlvysEntry.Direction, 'An entry created through the API page should be inbound.');
+        Assert.AreEqual('POST', AlvysEntry.Method, 'The method sent by Alvys should be logged.');
+        Assert.AreEqual('PS-INV101026', AlvysEntry."Document No.", 'The document number sent by Alvys should be logged.');
+        Assert.AreEqual(RequestBody, AlvysEntry.GetRequestBody(), 'The inbound payload should be stored on the entry unchanged.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageAssignsNextEntryNo()
+    var
+        FirstEntry, SecondEntry : Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] The API page numbers inbound entries itself, since the caller cannot.
+        Initialize();
+
+        // [WHEN] Two driver pay payloads arrive
+        InsertInboundEntry('PS-INV101026', DriverPayPayload(), FirstEntry);
+        InsertInboundEntry('PS-INV101027', DriverPayPayload(), SecondEntry);
+
+        // [THEN] Each entry is given the next number in the log
+        Assert.AreNotEqual(0, FirstEntry."Entry No.", 'An inbound entry should be given an entry number.');
+        Assert.AreEqual(FirstEntry."Entry No." + 1, SecondEntry."Entry No.", 'The second inbound entry should take the next entry number.');
+    end;
+
+    [Test]
+    procedure OutboundCallsAreLoggedAsOutbound()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] Calls Business Central sends to Alvys keep the outbound direction, so the log
+        // separates the two legs.
+        Initialize();
+
+        // [WHEN] A truck is looked up in Alvys
+        AlvysSalesMgt.GetTruckID('1');
+
+        // [THEN] The call is logged as outbound
+        AlvysEntry.FindLast();
+        Assert.AreEqual(AlvysEntry.Direction::Outbound, AlvysEntry.Direction, 'A call sent to Alvys should be logged as outbound.');
+    end;
+
+    [Test]
+    procedure InboundEntriesAreSeparableFromOutboundEntries()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        InboundEntry: Record "BAASI Alvys Sales Entry";
+        InboundEntryNo: Integer;
+    begin
+        // [SCENARIO] The direction filter the API page carries returns the inbound entries only,
+        // never the outbound log.
+        Initialize();
+
+        // [GIVEN] An outbound call and an inbound call have both been logged
+        AlvysSalesMgt.GetTruckID('1');
+        InsertInboundEntry('PS-INV101026', DriverPayPayload(), InboundEntry);
+        InboundEntryNo := InboundEntry."Entry No.";
+
+        // [WHEN] The log is read through the filter the API page applies
+        AlvysEntry.SetRange(Direction, AlvysEntry.Direction::Inbound);
+
+        // [THEN] Only inbound entries come back, and the inbound entry is among them
+        Assert.IsTrue(AlvysEntry.FindSet(), 'The direction filter should return the inbound entry.');
+        repeat
+            Assert.AreEqual(AlvysEntry.Direction::Inbound, AlvysEntry.Direction, 'The API page filter should not expose outbound entries.');
+        until AlvysEntry.Next() = 0;
+
+        AlvysEntry.SetRange("Entry No.", InboundEntryNo);
+        Assert.IsFalse(AlvysEntry.IsEmpty(), 'The inbound entry should be readable through the page filter.');
+    end;
+
+    /// <summary>
+    /// Logs a payload the way the API page does when Alvys posts one, and hands back the entry it
+    /// created. The page's insert trigger is a single call to PrepareInboundEntry, so going through
+    /// the codeunit exercises the same numbering and direction logic; the OData plumbing around it
+    /// cannot be reached from a test session.
+    /// </summary>
+    local procedure InsertInboundEntry(DocumentNo: Code[20]; RequestBody: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    begin
+        AlvysEntry.Init();
+        AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
+        AlvysEntry."Document No." := DocumentNo;
+        AlvysEntry.URL := '/api/tanager/alvys/v1.0/alvysApplyDeductions';
+        AlvysEntry.Method := 'POST';
+        AlvysSalesMgt.PrepareInboundEntry(AlvysEntry, RequestBody);
+        AlvysEntry.Insert(true);
+    end;
+
+    /// <summary>
+    /// The driver pay payload as it is described in the technical scope. The field names are still
+    /// Alvys' to confirm, so this is the shape the page has to survive, not a contract.
+    /// </summary>
+    local procedure DriverPayPayload(): Text
+    begin
+        exit('{"DeductionId":"4ba92c0d-736d-4b44-85d0-12c9fc9bad71","TruckId":"TR2516627931370728085",' +
+            '"TruckNumber":"1","Amount":55.0,"SettlementDate":"2026-07-22","Description":"Settlement 12345"}');
+    end;
+
     /// <summary>
     /// Checks that the environment carries the endpoint and credentials the integration needs, and
     /// clears any cached token so each test starts from a fresh authentication. The credentials are
