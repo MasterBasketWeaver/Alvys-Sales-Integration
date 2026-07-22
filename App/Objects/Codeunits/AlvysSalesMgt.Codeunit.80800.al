@@ -183,7 +183,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, MapDocumentType(DocType), DocNo, PostedDocNo);
         if PreviewMode then
             DeleteDeduction(JsonMgt.GetJsonValueAsText(ResponseObj, 'Id'));
-        exit(InsertDeduction(ResponseObj, TruckNumber, DocType, DocNo, PostedDocNo));
+        exit(InsertDeduction(ResponseObj, TruckNumber, MapDocumentType(DocType), DocNo, PostedDocNo));
     end;
 
     local procedure PrepareDeductionBody(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; var JsonBody: JsonObject)
@@ -263,10 +263,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]): Text
     begin
-        exit(InsertDeduction(ResponseObj, TruckNumber, NoDocumentType(), '', ''));
+        exit(InsertDeduction(ResponseObj, TruckNumber, Enum::"BAASI Alvys Entry Doc. Type"::" ", '', ''));
     end;
 
-    local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
+    local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]; DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
         AmountObj: JsonObject;
@@ -370,15 +370,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         if AccessToken <> '' then
             RequestHeaderValues.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
         RequestHeaderValues.Add('Accept', 'application/json');
-    end;
-
-    /// <summary>
-    /// The placeholder Document Type stored for calls that have no sales document behind them.
-    /// Kept in one place so the choice of placeholder is not spread across call sites.
-    /// </summary>
-    local procedure NoDocumentType(): Enum "Sales Document Type"
-    begin
-        exit(Enum::"Sales Document Type"::Quote);
     end;
 
     /// <summary>

@@ -152,7 +152,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Assert.AreEqual('1', AlvysDeduction."Truck Number", 'The deduction should carry the tractor code dimension value from the posted invoice as its truck number.');
 
         // [THEN] Both the originating document and the posted invoice are recorded on it
-        Assert.AreEqual(SalesHeader."Document Type"::Order, AlvysDeduction."Document Type", 'The deduction should carry the document type it was posted from.');
+        Assert.AreEqual(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Order", AlvysDeduction."Document Type", 'The deduction should carry the document type it was posted from.');
         Assert.AreEqual('ALVYS-TEST-ORD', AlvysDeduction."Document No.", 'The deduction should carry the number of the document it was posted from.');
         Assert.AreEqual('ALVYS-TEST-INV', AlvysDeduction."Posted Document No.", 'The deduction should carry the posted invoice number.');
     end;
