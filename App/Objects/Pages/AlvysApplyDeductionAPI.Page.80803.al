@@ -174,26 +174,22 @@ page 80803 "BAASI Alvys Apply Ded. API"
     trigger OnInsertRecord(BelowxRec: Boolean): Boolean
     var
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
-        Retryable: Boolean;
     begin
-        AlvysSalesMgt.PrepareApplyDeductionEntry(Rec, DeductionIdTxt, TruckIdTxt, TruckNumberTxt, AmountDec, SettlementDateVar, DescriptionTxt, Retryable);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(Rec, DeductionIdTxt, TruckIdTxt, TruckNumberTxt, AmountDec, SettlementDateVar, DescriptionTxt);
 
         // The entry is written whichever way the call is answered: the log is the record of what
         // Alvys sent, and a call that failed is the one most worth having. Inserting here rather
         // than leaving it to the framework keeps every path identical up to this point.
         Rec.Insert(true);
 
-        // A failure Alvys could clear by sending the same payload again is refused, so it does
-        // retry — the deduction's document has not been posted yet, and the invoice the settlement
-        // needs will exist shortly. Anything else is answered 201 with the reason on the entry: a
-        // deduction Business Central has no record of will never match, so refusing it would buy
-        // nothing but a retry for as long as Alvys keeps trying, and a duplicate log row for each.
-        if not Retryable then
+        // A settlement that matched is the only call answered 201. Every failure is refused, with
+        // the reason it could not be applied as the error text.
+        if Rec."Error Message" = '' then
             exit(false);
 
         // The error rolls the transaction back and would take the entry above with it, so it is
-        // committed first — on this path only. Every other path commits with the framework's own
-        // transaction, once this trigger returns.
+        // committed first. Every failure path passes through here, so this guards the whole log;
+        // the success path above commits with the framework's own transaction once this returns.
         Commit();
         Error(Rec."Error Message");
     end;

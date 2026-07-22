@@ -11,13 +11,11 @@ So this hits the real endpoint over HTTP and asserts the things Alvys actually d
   1. The property names and EDM types published in $metadata. These are the wire contract now,
      and renaming a page control silently rewrites them.
   2. That a payload matching a posted invoice is accepted, and comes back pointed at that invoice.
-  3. That a failure Alvys could clear by retrying -- a deduction whose document is not posted yet
-     -- is refused with a 400, and that the entry is logged anyway. The refusal rolls the
-     transaction back, so the entry only survives because the page commits it first. That commit
-     is the whole reason this check exists.
-  4. That a failure retrying cannot clear -- an unknown or blank deduction Id -- is answered 201
-     with the reason on the entry instead. Refusing it would buy nothing but a retry for as long
-     as Alvys keeps trying, and a duplicate log row for each attempt.
+  3. That a deduction whose document is not posted yet is refused with a 400, and that the entry
+     is logged anyway. The refusal rolls the transaction back, so the entry only survives because
+     the page commits it first. That commit is the whole reason this check exists.
+  4. That an unknown or blank deduction Id is refused the same way, and is likewise logged. Every
+     settlement that cannot be applied is a 400, whatever the reason.
   5. That each of the six parameters marks the record dirty on its own. They are bound to page
      variables rather than table fields, so each rests on its own OnValidate; without it the
      delayed insert never fires and the call is answered 201 with nothing written.
@@ -190,9 +188,9 @@ def main():
     check(not created.get("errorMessage"),
           f"a matched deduction logs no error (got {created.get('errorMessage')!r})")
 
-    print("\n[3/8] A failure Alvys can clear by retrying is refused")
-    # A deduction whose document is not posted yet will match once it is, so the same payload sent
-    # again can succeed. That is the one failure worth a 400.
+    print("\n[3/8] A deduction on an unposted document is refused")
+    # A deduction whose document is not posted yet has no posted invoice for the settlement to
+    # apply against, so the call is refused like any other settlement that cannot be applied.
     #
     # The refusal raises an error, which rolls the transaction back. The entry survives only
     # because the page commits it before erroring; without that commit this check fails and every
@@ -208,7 +206,7 @@ def main():
 
     resp = settle(entity_set, headers, deductionId=retryable_id)
     check(resp.status_code == 400,
-          f"an unposted deduction is refused so Alvys retries (got {resp.status_code})")
+          f"an unposted deduction is refused (got {resp.status_code})")
     check(retryable_id in resp.text,
           f"the 400 names the deduction it could not apply (got {resp.text[:200]})")
 
@@ -220,46 +218,47 @@ def main():
         check("has not been posted" in (logged.get("errorMessage") or ""),
               f"the refused entry says why (got {logged.get('errorMessage')!r})")
 
-    print("\n[4/8] A failure retrying cannot clear is accepted and logged")
-    # A deduction Business Central has no record of will never match, so refusing it would buy
-    # nothing but a retry for as long as Alvys keeps trying, and a duplicate log row for each.
+    print("\n[4/8] A deduction that can never match is refused and logged")
+    # A deduction Business Central has no record of will never match. It is refused all the same --
+    # every settlement that cannot be applied is a 400. As above, the entry survives the rollback
+    # only because the page commits it first.
     unmatched_id = str(uuid.uuid4())
     resp = settle(entity_set, headers, deductionId=unmatched_id)
-    check(resp.status_code == 201,
-          f"an unknown deduction is accepted, not refused (got {resp.status_code}: "
-          f"{resp.text[:160]})")
-    if resp.status_code == 201:
-        unmatched = resp.json()
-        check(unmatched.get("documentNo") == "",
-              f"an unknown deduction gets no document number (got {unmatched.get('documentNo')!r})")
-        check(unmatched_id in (unmatched.get("errorMessage") or ""),
-              f"the response carries the reason it could not be applied "
-              f"(got {unmatched.get('errorMessage')!r})")
+    check(resp.status_code == 400,
+          f"an unknown deduction is refused (got {resp.status_code}: {resp.text[:160]})")
+    check(unmatched_id in resp.text,
+          f"the 400 names the deduction it could not apply (got {resp.text[:200]})")
+
+    logged = find_entry(entity_set, headers, unmatched_id)
+    check(logged is not None, "the unknown deduction is logged despite the error rolling back")
+    if logged:
+        check(logged.get("documentNo") == "",
+              f"an unknown deduction gets no document number (got {logged.get('documentNo')!r})")
 
     # A blank deduction Id has nothing to match on and never will, so it is treated the same way.
     resp = settle(entity_set, headers, deductionId="")
-    check(resp.status_code == 201, f"a blank deduction Id is accepted (got {resp.status_code})")
-    if resp.status_code == 201:
-        check("cannot be blank" in (resp.json().get("errorMessage") or ""),
-              f"a blank deduction Id logs its reason (got {resp.json().get('errorMessage')!r})")
+    check(resp.status_code == 400, f"a blank deduction Id is refused (got {resp.status_code})")
+    check("no deduction Id" in resp.text,
+          f"a blank deduction Id logs its reason (got {resp.text[:200]})")
 
     print("\n[5/8] Each parameter marks the record dirty")
     # A parameter that lost its OnValidate leaves the record clean, so the delayed insert never
-    # fires, OnInsertRecord never runs, and the call is answered 201 with nothing written. Since an
-    # unmatchable payload is now answered 201 too, the status alone cannot tell those apart: what
-    # separates them is whether a row was actually persisted.
+    # fires and OnInsertRecord never runs. Each payload here carries one parameter and so cannot
+    # match a posted invoice, which means the trigger refuses it: 400 proves the trigger ran, 201
+    # proves it did not. That discriminator works precisely because every failure is now a 400.
     for prop in PARAMETERS:
         resp = requests.post(entity_set, headers=headers,
                              data=json.dumps({prop: DRIVER_PAY_PAYLOAD[prop] or unmatched_id}),
                              timeout=120)
-        single = resp.json() if resp.status_code == 201 else {}
-        check(single.get("id", ZERO_GUID) != ZERO_GUID and single.get("entryNo", 0) > 0,
-              f"'{prop}' alone is persisted, not just acknowledged "
-              f"(got {resp.status_code}, id {single.get('id')})")
+        check(resp.status_code == 400,
+              f"'{prop}' alone marks the record dirty, so the insert trigger runs "
+              f"(got {resp.status_code})")
 
     print("\n[6/8] Derived fields are not inputs")
     # Sent alongside a payload that would otherwise be accepted, so a 400 means the property was
-    # refused rather than the settlement failing to match.
+    # refused rather than the settlement failing to match. The matched deduction Id is load-bearing
+    # here: every failed settlement is a 400 too, so against any other Id these checks would pass
+    # whether or not the property was actually refused.
     for prop in READ_ONLY_PROPERTIES:
         resp = settle(entity_set, headers, deductionId=matched_id, **{prop: "x"})
         check(resp.status_code >= 400, f"'{prop}' is refused as an input (got {resp.status_code})")

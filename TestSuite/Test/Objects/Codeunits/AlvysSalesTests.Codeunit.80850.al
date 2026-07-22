@@ -396,86 +396,89 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         // [THEN] The call is logged, with no document and the reason it could not be matched
         Assert.AreNotEqual(0, AlvysEntry."Entry No.", 'A payload with no deduction Id should still be logged.');
         Assert.AreEqual('', AlvysEntry."Document No.", 'A payload with no deduction Id should not be pointed at a document.');
-        Assert.AreEqual('The deduction Id cannot be blank.', AlvysEntry."Error Message", 'The error should say the deduction Id is blank.');
+        Assert.AreEqual('The payload has no deduction Id, so there is nothing to match it to a posted invoice.', AlvysEntry."Error Message", 'The error should say the deduction Id is blank.');
     end;
 
     /// <summary>
-    /// The API page refuses a payload only where the codeunit marked the failure retryable, so
-    /// every other payload is answered 201 with the reason on the entry. Which HTTP status comes
-    /// back is a page-level concern and cannot be reached from a test session; the OData contract
-    /// test covers that. What is checked here is the decision behind it.
+    /// The API page refuses every payload that logs a reason, so only a matched settlement is
+    /// answered 201. Which HTTP status comes back is a page-level concern and cannot be reached
+    /// from a test session; the OData contract test covers that. What is checked here is the
+    /// error text behind it, and that a matched settlement leaves none.
     /// </summary>
     [Test]
     procedure MatchedDeductionLeavesNoErrorToRefuseOn()
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
-        Retryable: Boolean;
     begin
         // [SCENARIO] A payload that does match a posted invoice carries no error, so the API page
         // has nothing to refuse it on and Alvys is answered 201.
         Initialize();
 
         // [WHEN] Alvys settles a deduction that is linked to a posted invoice
-        InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry, Retryable);
+        InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry);
 
         // [THEN] The entry carries a document and no error
         Assert.AreNotEqual('', AlvysEntry."Document No.", 'A matched deduction should be pointed at its posted invoice.');
         Assert.AreEqual('', AlvysEntry."Error Message", 'A matched deduction should leave nothing for the page to refuse on.');
-        Assert.IsFalse(Retryable, 'A payload that succeeded should not be marked for retry.');
     end;
 
     [Test]
-    procedure UnpostedDeductionIsRetryable()
+    procedure UnpostedReasonNamesTheDocumentToPost()
     var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
         AlvysEntry: Record "BAASI Alvys Sales Entry";
-        Retryable: Boolean;
+        DeductionId: Text;
     begin
-        // [SCENARIO] A deduction whose document has not been posted will match once it is, so the
-        // same payload sent again can succeed. That is the one failure Alvys is asked to retry.
+        // [SCENARIO] The settlement can be applied once the deduction's document is posted, so the
+        // reason names that document — the actionable part — rather than the deduction alone.
         Initialize();
 
-        // [WHEN] Alvys settles a deduction that is not on a posted invoice yet
-        InsertInboundEntry(LoggedDeductionId(''), AlvysEntry, Retryable);
+        // [GIVEN] A deduction sitting on an unposted document
+        DeductionId := LoggedDeductionId('');
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        AlvysDeduction.FindLast();
+        AlvysDeduction."Document No." := 'S-INV1006';
+        AlvysDeduction.Modify(true);
 
-        // [THEN] The failure is marked retryable, so the page refuses the call
-        Assert.AreNotEqual('', AlvysEntry."Error Message", 'An unposted deduction should log a reason.');
-        Assert.IsTrue(Retryable, 'An unposted deduction should be retryable: posting the document makes the same payload succeed.');
+        // [WHEN] Alvys settles it
+        InsertInboundEntry(DeductionId, AlvysEntry);
+
+        // [THEN] The reason names the document to post
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('Sales Invoice'), 'The reason should name the document type to post.');
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('S-INV1006'), 'The reason should name the document number to post.');
     end;
 
     [Test]
-    procedure UnmatchableDeductionIsNotRetryable()
+    procedure ReasonsFitTheErrorMessageField()
     var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
         AlvysEntry: Record "BAASI Alvys Sales Entry";
-        Retryable: Boolean;
+        DeductionId: Text;
     begin
-        // [SCENARIO] A deduction Business Central has no record of will never match, however many
-        // times Alvys sends it. Refusing it would buy nothing but a retry loop and a duplicate log
-        // row for each attempt, so it is accepted with the reason on the entry instead.
+        // [SCENARIO] The reason is truncated into the entry field before it is raised, so the
+        // truncated text is what reaches Alvys. A reason that outgrows the field would be cut off
+        // mid-sentence on the wire, silently. Each one is checked against the ceiling here.
         Initialize();
 
-        // [WHEN] Alvys settles a deduction that was never recorded
-        InsertInboundEntry('4ba92c0d-736d-4b44-85d0-12c9fc9bad71', AlvysEntry, Retryable);
+        // [WHEN] A deduction is settled against a document that has not been posted
+        DeductionId := LoggedDeductionId('');
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        AlvysDeduction.FindLast();
+        AlvysDeduction."Document No." := 'S-INV1006';
+        AlvysDeduction.Modify(true);
+        InsertInboundEntry(DeductionId, AlvysEntry);
 
-        // [THEN] The failure is not marked retryable, so the page accepts the call and logs it
-        Assert.AreNotEqual('', AlvysEntry."Error Message", 'An unknown deduction should log a reason.');
-        Assert.IsFalse(Retryable, 'An unknown deduction should not be retryable: it can never match.');
-    end;
+        // [THEN] The reason fits, and so does every other one
+        Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The unposted reason should fit the error message field without truncation.');
 
-    [Test]
-    procedure BlankDeductionIsNotRetryable()
-    var
-        AlvysEntry: Record "BAASI Alvys Sales Entry";
-        Retryable: Boolean;
-    begin
-        // [SCENARIO] A payload with no deduction Id has nothing to match on and never will, so it
-        // is treated the same as one naming a deduction that does not exist.
-        Initialize();
+        InsertInboundEntry('4ba92c0d-736d-4b44-85d0-12c9fc9bad71', AlvysEntry);
+        Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The unknown deduction reason should fit the error message field without truncation.');
 
-        // [WHEN] A payload arrives with no deduction Id
-        InsertInboundEntry('', AlvysEntry, Retryable);
+        InsertInboundEntry('', AlvysEntry);
+        Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The blank deduction reason should fit the error message field without truncation.');
 
-        // [THEN] The failure is not marked retryable
-        Assert.IsFalse(Retryable, 'A blank deduction Id should not be retryable: resending it changes nothing.');
+        InsertInboundEntry(LoggedDeductionId('S-INV-GONE'), AlvysEntry);
+        Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The missing invoice reason should fit the error message field without truncation.');
     end;
 
     [Test]
@@ -554,16 +557,9 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     /// survive, not a contract.
     /// </summary>
     local procedure InsertInboundEntry(DeductionId: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
-    var
-        Retryable: Boolean;
-    begin
-        InsertInboundEntry(DeductionId, AlvysEntry, Retryable);
-    end;
-
-    local procedure InsertInboundEntry(DeductionId: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry"; var Retryable: Boolean)
     begin
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, 'TR2516627931370728085', '1', -55.0, WorkDate(), 'Settlement 12345', Retryable);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, 'TR2516627931370728085', '1', -55.0, WorkDate(), 'Settlement 12345');
         AlvysEntry.Insert(true);
     end;
 
