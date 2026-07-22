@@ -1,0 +1,332 @@
+codeunit 80853 "BAASIT Fleetrock E2E Tests"
+{
+    // [FEATURE] [Fleetrock Integration] [Alvys Sales Integration]
+    //
+    // End-to-end integration test across the live Fleetrock test tenant, Business Central and the
+    // live Alvys API: a repair order is created and invoiced in Fleetrock, imported by the
+    // Fleetrock Integration job queue codeunit, posted, and verified all the way to the truck
+    // deduction in Alvys. Business Central data is rolled back when the test run ends, the
+    // repair order is walked back from Invoiced and deleted in Fleetrock, and the deduction is
+    // deleted from Alvys, so nothing accumulates in either tenant.
+
+    Subtype = Test;
+    TestPermissions = Disabled;
+
+    [Test]
+    procedure InvoicedRepairOrderIsImportedPostedAndDeducted()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        DimSetEntry: Record "Dimension Set Entry";
+        JobQueueEntry: Record "Job Queue Entry";
+        RepairHeaderStaging: Record "FRI Repair Header";
+        SalesHeader: Record "Sales Header";
+        SalesInvHeader: Record "Sales Invoice Header";
+        SalesLine: Record "Sales Line";
+        GetRepairOrders: Codeunit "FRI Get Repair Orders";
+        ROObj, ResponseObj, AmountObj : JsonObject;
+        JsonTkn: JsonToken;
+        ROId: Text;
+        InvoiceNo: Code[20];
+        ThreeDays: Duration;
+    begin
+        // [SCENARIO] A repair order created and invoiced in Fleetrock is imported by the invoiced
+        // job as a sales invoice carrying the repair order's amounts and the unit's asset
+        // dimension; posting the invoice succeeds and creates a truck deduction in both Business
+        // Central and Alvys.
+        Initialize();
+
+        // [GIVEN] A repair order in Fleetrock for unit 567 with one task (2h x $75.00 labor) and
+        // one part (2 x $27.50), so the grand total is $205.00
+        ROId := CreateRepairOrder();
+
+        // [GIVEN] The repair order is invoiced in Fleetrock as of yesterday
+        SetRepairOrderToInvoiced(ROId);
+        ROObj := GetRepairOrder(ROId);
+        Assert.AreEqual('Invoiced', JsonMgt.GetJsonValueAsText(ROObj, 'status'), 'The repair order should be Invoiced in Fleetrock after the update.');
+        Assert.AreEqual(205.0, JsonMgt.GetJsonValueAsDecimal(ROObj, 'grand_total'), 'The Fleetrock grand total should match the task and part amounts the order was created with.');
+        Assert.AreEqual('567', JsonMgt.GetJsonValueAsText(ROObj, 'unit_number'), 'The repair order should be for unit 567.');
+
+        // [WHEN] The invoiced import job runs over a window that covers the invoiced date
+        JobQueueEntry.Init();
+        JobQueueEntry."Parameter String" := 'invoiced';
+        ThreeDays := 3 * 24 * 60 * 60 * 1000;
+        GetRepairOrders.SetStartDateTime(CurrentDateTime() - ThreeDays);
+        GetRepairOrders.Run(JobQueueEntry);
+
+        // [THEN] A sales invoice was created for the repair order
+        SalesHeader.SetRange("Document Type", SalesHeader."Document Type"::Invoice);
+        SalesHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        Assert.IsTrue(SalesHeader.FindFirst(), StrSubstNo('A sales invoice should have been created for repair order %1.%2', ROId, GetStagingError(ROId)));
+        InvoiceNo := SalesHeader."No.";
+        Assert.AreEqual(ROId, Format(SalesHeader."External Document No."), 'The repair order id should be carried as the external document number when the order has no PO number.');
+
+        // The staging record carries the invoiced datetime shifted to the user's time zone, and
+        // the posting date is derived from it, so the date is compared against the staging record
+        // rather than recomputed here.
+        RepairHeaderStaging.SetRange(id, ROId);
+        Assert.IsTrue(RepairHeaderStaging.FindLast(), 'A staging record should exist for the imported repair order.');
+        Assert.IsTrue(RepairHeaderStaging."Invoiced At" <> 0DT, 'The staging record should carry the invoiced datetime.');
+        Assert.AreEqual(DT2Date(RepairHeaderStaging."Invoiced At"), SalesHeader."Posting Date", 'The posting date should be the date the repair order was invoiced in Fleetrock.');
+
+        // [THEN] The invoice is for the customer the Fleetrock order belongs to
+        Assert.AreEqual(GetFleetrockCustomerNo(), SalesHeader."Sell-to Customer No.", 'The invoice should be for the customer mapped to the Fleetrock customer account.');
+
+        // [THEN] The invoice carries the unit number as the asset dimension
+        Assert.IsTrue(DimSetEntry.Get(SalesHeader."Dimension Set ID", FleetrockSetup."Asset Dimension Code"), 'The invoice should carry the asset dimension.');
+        Assert.AreEqual('567', Format(DimSetEntry."Dimension Value Code"), 'The asset dimension value should be the Fleetrock unit number.');
+
+        // [THEN] The invoice has one labor line and one part line with the repair order's amounts
+        SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
+        SalesLine.SetRange("Document No.", InvoiceNo);
+        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        Assert.AreEqual(2, SalesLine.Count(), 'The invoice should have exactly one labor line and one part line.');
+        SalesLine.SetRange("No.", FleetrockSetup."Labor Item No.");
+        Assert.IsTrue(SalesLine.FindFirst(), 'The invoice should have a labor line.');
+        Assert.AreEqual(2.0, SalesLine.Quantity, 'The labor line quantity should be the labor hours.');
+        Assert.AreEqual(75.0, SalesLine."Unit Price", 'The labor line unit price should be the hourly rate.');
+        Assert.AreEqual(150.0, SalesLine."Line Amount", 'The labor line amount should be the labor subtotal.');
+        SalesLine.SetRange("No.", FleetrockSetup."Parts Item No.");
+        Assert.IsTrue(SalesLine.FindFirst(), 'The invoice should have a part line.');
+        Assert.AreEqual(2.0, SalesLine.Quantity, 'The part line quantity should be the part quantity.');
+        Assert.AreEqual(27.5, SalesLine."Unit Price", 'The part line unit price should be the part price.');
+        Assert.AreEqual(55.0, SalesLine."Line Amount", 'The part line amount should be the part subtotal.');
+
+        // [THEN] The invoice totals match the Fleetrock repair order
+        SalesHeader.CalcFields(Amount, "Amount Including VAT");
+        Assert.AreEqual(205.0, SalesHeader.Amount, 'The invoice amount should match the repair order labor and part totals.');
+        Assert.AreEqual(JsonMgt.GetJsonValueAsDecimal(ROObj, 'grand_total'), SalesHeader."Amount Including VAT", 'The invoice total should match the Fleetrock grand total.');
+
+        // [GIVEN] The sandbox's TEST location on the header and lines: another app in the
+        // environment requires a location to post, and the integration does not assign one.
+        // The location is assigned without validation, because validating it rebuilds the
+        // dimension sets from default dimensions and would wipe the asset dimension the
+        // integration placed on the document.
+        SalesHeader."Location Code" := 'TEST';
+        SalesHeader.Modify(true);
+        SalesLine.Reset();
+        SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
+        SalesLine.SetRange("Document No.", InvoiceNo);
+        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        SalesLine.FindSet(true);
+        repeat
+            SalesLine."Location Code" := 'TEST';
+            SalesLine.Modify(true);
+        until SalesLine.Next() = 0;
+
+        // [WHEN] The invoice is posted. The import left a write transaction open, and posting
+        // cannot start inside one, so it is committed first -- the same way the integration's own
+        // auto-post does it. Test isolation still rolls the committed data back after the run.
+        Commit();
+        Assert.IsTrue(Codeunit.Run(Codeunit::"Sales-Post", SalesHeader), StrSubstNo('Posting the invoice should succeed: %1', GetLastErrorText()));
+
+        // [THEN] The posted invoice carries the repair order number and total
+        SalesInvHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        Assert.IsTrue(SalesInvHeader.FindFirst(), StrSubstNo('A posted sales invoice should exist for repair order %1.', ROId));
+        SalesInvHeader.CalcFields("Amount Including VAT");
+        Assert.AreEqual(205.0, SalesInvHeader."Amount Including VAT", 'The posted invoice total should match the repair order grand total.');
+
+        // [THEN] A deduction for the truck was logged in Business Central against both documents
+        AlvysDeduction.SetRange("Posted Document No.", SalesInvHeader."No.");
+        Assert.IsTrue(AlvysDeduction.FindLast(), 'Posting the invoice should log a deduction in the Alvys Deduction table.');
+        Assert.AreEqual('567', AlvysDeduction."Truck Number", 'The deduction should be for the truck matching the Fleetrock unit number.');
+        Assert.AreEqual('TR2516219714834333288', AlvysDeduction."Truck Id", 'The deduction should carry the Alvys truck id resolved from the unit number.');
+        Assert.AreEqual(-205.0, AlvysDeduction.Amount, 'The deduction amount should be the negated invoice total.');
+        Assert.AreEqual('Owner Operator Invoice', AlvysDeduction.Category, 'The deduction should use the owner operator invoice category.');
+        Assert.AreEqual(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Invoice", AlvysDeduction."Document Type", 'The deduction should carry the document type it was posted from.');
+        Assert.AreEqual(InvoiceNo, AlvysDeduction."Document No.", 'The deduction should carry the invoice it was posted from.');
+
+        // [THEN] The deduction exists in Alvys with the same truck and amount
+        ResponseObj := AlvysSalesMgt.GetDeduction(AlvysDeduction.Id);
+        Assert.AreEqual(Format(AlvysDeduction.Id), JsonMgt.GetJsonValueAsText(ResponseObj, 'Id'), 'Alvys should return the deduction created by the posting.');
+        Assert.AreEqual('TR2516219714834333288', JsonMgt.GetJsonValueAsText(ResponseObj, 'TruckId'), 'The Alvys deduction should be linked to the truck.');
+        Assert.IsTrue(ResponseObj.Get('Amount', JsonTkn), 'The Alvys deduction should carry an amount.');
+        AmountObj := JsonTkn.AsObject();
+        Assert.AreEqual(-205.0, JsonMgt.GetJsonValueAsDecimal(AmountObj, 'Amount'), 'The Alvys deduction amount should be the negated invoice total.');
+
+        // [THEN] The deduction can be deleted from Alvys again, so test runs do not accumulate
+        // deductions in the tenant; the logged BC record rolls back with the rest of the test data
+        AlvysSalesMgt.DeleteDeduction(AlvysDeduction.Id);
+        Assert.IsFalse(AlvysSalesMgt.DoesDeductionExist(AlvysDeduction.Id), 'The deduction should be deleted from Alvys after the test.');
+
+        // [THEN] The repair order can be walked back from Invoiced and deleted in Fleetrock
+        DeleteRepairOrder(ROId);
+        ROObj := GetRepairOrder(ROId);
+        Assert.AreEqual('Deleted', JsonMgt.GetJsonValueAsText(ROObj, 'status'), 'The repair order should be deleted in Fleetrock after the test.');
+    end;
+
+    /// <summary>
+    /// Requires both integrations to be properly configured in the company the suite runs in,
+    /// rather than seeding any setup: the Alvys integration must be enabled with its credentials
+    /// and tractor code dimension, and the Fleetrock integration must carry its credentials and
+    /// use that same dimension as its asset dimension so posting hands the truck to Alvys.
+    /// Auto-posting must be off because the test verifies the posting step itself, and the
+    /// Fleetrock test tenant only accepts the raw API key, not a generated token.
+    /// </summary>
+    local procedure Initialize()
+    begin
+        AlvysSetup.Get();
+        AlvysSetup.TestField(Enabled);
+        AlvysSetup.TestField("Integration URL");
+        AlvysSetup.TestField("Client ID");
+        AlvysSetup.TestField("Client Secret");
+        AlvysSetup.TestField("Tractor Code Dimension");
+
+        FleetrockSetup.Get();
+        FleetrockSetup.TestField("Integration URL");
+        FleetrockSetup.TestField(Username);
+        FleetrockSetup.TestField("API Key");
+        FleetrockSetup.TestField("Vendor Username");
+        FleetrockSetup.TestField("Asset Dimension Code", AlvysSetup."Tractor Code Dimension");
+        FleetrockSetup.TestField("Auto-post Repair Orders", false);
+        FleetrockSetup.TestField("Use API Token", false);
+
+        Clear(AlvysSalesMgt);
+        Clear(FleetrockMgt);
+    end;
+
+    /// <summary>
+    /// Creates a repair order in Fleetrock through the AddRO API for unit 567 (a unit whose number
+    /// matches an active Alvys truck) with one labor task and one part. AddRO defaults the
+    /// invoiced and paid dates to the finished date, so the order comes back as Paid until
+    /// SetRepairOrderToInvoiced moves it to Invoiced.
+    /// </summary>
+    local procedure CreateRepairOrder() ROId: Text
+    var
+        JsonBody, ROJson, TaskJson, PartJson, ResponseObj : JsonObject;
+        ROArray, TaskArray, PartArray : JsonArray;
+    begin
+        PartJson.Add('part_subtotal', '55.00');
+        PartJson.Add('part_quantity', '2');
+        PartJson.Add('part_description', 'BC test part');
+        PartArray.Add(PartJson);
+
+        TaskJson.Add('labor_subtotal', '150.00');
+        TaskJson.Add('labor_hours', '2');
+        TaskJson.Add('labor_complaint', 'BC test app repair');
+        TaskJson.Add('parts', PartArray);
+        TaskArray.Add(TaskJson);
+
+        ROJson.Add('vin', '1234567890');
+        ROJson.Add('date_started', FormatFleetrockDate(CalcDate('<-2D>', Today())));
+        ROJson.Add('date_finished', FormatFleetrockDate(CalcDate('<-1D>', Today())));
+        ROJson.Add('invoice_number', StrSubstNo('BCTEST-%1', Format(CurrentDateTime(), 0, '<Year4><Month,2><Day,2><Hours24,2><Minutes,2><Seconds,2>')));
+        ROJson.Add('notes', 'Created by the BC test app');
+        ROJson.Add('tasks', TaskArray);
+        ROArray.Add(ROJson);
+
+        JsonBody.Add('customer_id', FleetrockSetup.Username);
+        JsonBody.Add('vendor_id', FleetrockSetup."Vendor Username");
+        JsonBody.Add('repair_orders', ROArray);
+
+        ResponseObj := PostToFleetrock('AddRO', JsonBody);
+        ROId := JsonMgt.GetJsonValueAsText(ResponseObj, 'ro_id');
+        Assert.AreNotEqual('', ROId, 'AddRO should return the id of the created repair order.');
+    end;
+
+    /// <summary>
+    /// Moves the repair order to Invoiced as of yesterday. The paid date is removed first and the
+    /// invoiced date set in a second call, because Fleetrock stores a combined update with an
+    /// unpredictable timestamp. Dates are sent date-only and parsed by Fleetrock as US Eastern,
+    /// so yesterday's date is always safely inside the import window regardless of time zone.
+    /// </summary>
+    local procedure SetRepairOrderToInvoiced(ROId: Text)
+    begin
+        UpdateRepairOrder(ROId, 'date_invoice_paid', 'delete');
+        UpdateRepairOrder(ROId, 'date_invoiced', FormatFleetrockDate(CalcDate('<-1D>', Today())));
+    end;
+
+    /// <summary>
+    /// Removes the repair order from Fleetrock once the test is done. Fleetrock refuses to delete
+    /// an invoiced order, so the invoiced and finished dates are removed first to walk the status
+    /// back. The API rejects removing the started date, so In Progress is as far back as an order
+    /// can go -- which is enough for the delete to be accepted.
+    /// </summary>
+    local procedure DeleteRepairOrder(ROId: Text)
+    begin
+        UpdateRepairOrder(ROId, 'date_invoiced', 'delete');
+        UpdateRepairOrder(ROId, 'date_finished', 'delete');
+        UpdateRepairOrder(ROId, 'status', 'deleted');
+    end;
+
+    local procedure UpdateRepairOrder(ROId: Text; FieldName: Text; FieldValue: Text)
+    var
+        JsonBody, ROJson : JsonObject;
+        ROArray: JsonArray;
+    begin
+        ROJson.Add('ro_id', ROId);
+        ROJson.Add(FieldName, FieldValue);
+        ROArray.Add(ROJson);
+        JsonBody.Add('username', FleetrockSetup.Username);
+        JsonBody.Add('repair_orders', ROArray);
+        PostToFleetrock('UpdateRO', JsonBody);
+    end;
+
+    /// <summary>
+    /// Posts a JSON body to a Fleetrock API endpoint and returns the first entry of its
+    /// "response" array, failing the test if Fleetrock reports an error.
+    /// </summary>
+    local procedure PostToFleetrock(Endpoint: Text; var JsonBody: JsonObject) ResponseObj: JsonObject
+    var
+        ResponseArray: JsonArray;
+        JTkn: JsonToken;
+    begin
+        ResponseArray := RestAPIMgt.GetResponseAsJsonArray(
+            StrSubstNo('%1/API/%2?token=%3', FleetrockSetup."Integration URL", Endpoint, FleetrockMgt.CheckToGetAPIToken()),
+            'response', 'POST', JsonBody);
+        Assert.AreEqual(1, ResponseArray.Count(), StrSubstNo('%1 should return one response entry.', Endpoint));
+        ResponseArray.Get(0, JTkn);
+        ResponseObj := JTkn.AsObject();
+        Assert.AreEqual('success', JsonMgt.GetJsonValueAsText(ResponseObj, 'result'),
+            StrSubstNo('%1 should succeed: %2', Endpoint, JsonMgt.GetJsonValueAsText(ResponseObj, 'message')));
+    end;
+
+    local procedure GetRepairOrder(ROId: Text) ROObj: JsonObject
+    var
+        ROArray: JsonArray;
+        JTkn: JsonToken;
+    begin
+        ROArray := RestAPIMgt.GetResponseAsJsonArray(
+            StrSubstNo('%1/API/GetRO?username=%2&token=%3&id=%4', FleetrockSetup."Integration URL", FleetrockSetup.Username, FleetrockMgt.CheckToGetAPIToken(), ROId),
+            'repair_orders');
+        Assert.AreEqual(1, ROArray.Count(), StrSubstNo('Fleetrock should return repair order %1.', ROId));
+        ROArray.Get(0, JTkn);
+        ROObj := JTkn.AsObject();
+    end;
+
+    local procedure GetFleetrockCustomerNo(): Code[20]
+    var
+        Customer: Record Customer;
+    begin
+        Customer.SetRange("FRI Fleetrock Source No.", 'Double Diamond - Test');
+        Assert.IsTrue(Customer.FindFirst(), 'A customer mapped to the Fleetrock customer account should exist after the import.');
+        exit(Customer."No.");
+    end;
+
+    /// <summary>
+    /// Pulls the import error logged on the staging record for the repair order, so a failed
+    /// import surfaces its cause in the test failure message.
+    /// </summary>
+    local procedure GetStagingError(ROId: Text): Text
+    var
+        RepairHeaderStaging: Record "FRI Repair Header";
+    begin
+        RepairHeaderStaging.SetRange(id, ROId);
+        if RepairHeaderStaging.FindLast() then
+            if RepairHeaderStaging."Error Message" <> '' then
+                exit(StrSubstNo(' Staging error: %1', RepairHeaderStaging."Error Message"));
+    end;
+
+    local procedure FormatFleetrockDate(D: Date): Text
+    begin
+        exit(Format(D, 0, '<Month>/<Day>/<Year4>'));
+    end;
+
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        FleetrockSetup: Record "FRI Fleetrock Setup";
+        Assert: Codeunit "Library Assert";
+        AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+        FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
+        JsonMgt: Codeunit "FRI Json Mgt.";
+        RestAPIMgt: Codeunit "FRI REST API Mgt.";
+}

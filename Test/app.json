@@ -36,6 +36,12 @@
       "name": "Library Assert",
       "publisher": "Microsoft",
       "version": "27.0.0.0"
+    },
+    {
+      "id": "9ac25096-0cd1-ab62-adc1-cc823016a988",
+      "name": "Fleetrock Integration",
+      "publisher": "BryanA BC Developments Inc.",
+      "version": "27.0.1.0"
     }
   ],
   "idRanges": [

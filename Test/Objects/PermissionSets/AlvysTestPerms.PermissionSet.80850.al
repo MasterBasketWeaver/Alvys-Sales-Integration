@@ -10,6 +10,7 @@ permissionset 80850 "BAASIT Test Perms."
         page "BAASIT Alvys Test Run API" = X,
         page "BAASIT Alvys Test Result API" = X,
         codeunit "BAASIT Alvys Sales Tests" = X,
+        codeunit "BAASIT Fleetrock E2E Tests" = X,
         codeunit "BAASIT Alvys Test Runner" = X,
         codeunit "BAASIT Test Run Mgt." = X;
 }

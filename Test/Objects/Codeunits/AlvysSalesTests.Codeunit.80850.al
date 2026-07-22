@@ -85,13 +85,14 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Initialize();
 
         // [WHEN] A deduction is created for a truck
-        DeductionID := AlvysSalesMgt.CreateDeductionForTruck('TR2516627931370728085', WorkDate(), -1.25, 'Test', 'BC test app - truck deduction');
+        DeductionID := AlvysSalesMgt.CreateDeductionForTruck('TR2516627931370728085', '1', WorkDate(), -1.25, 'Test', 'BC test app - truck deduction');
 
         // [THEN] Alvys returns an Id and the deduction is logged against the truck
         Assert.AreNotEqual('', DeductionID, 'CreateDeductionForTruck should return the Alvys deduction Id.');
         AlvysDeduction.SetRange(Id, CopyStr(DeductionID, 1, MaxStrLen(AlvysDeduction.Id)));
         Assert.IsTrue(AlvysDeduction.FindLast(), 'The created deduction should be logged in the Alvys Deduction table.');
         Assert.AreEqual('TR2516627931370728085', AlvysDeduction."Truck Id", 'The logged deduction should carry the truck Id.');
+        Assert.AreEqual('1', AlvysDeduction."Truck Number", 'The logged deduction should carry the truck number it was created for.');
         Assert.AreEqual('', AlvysDeduction."Driver Id", 'A truck deduction should not carry a driver Id.');
         Assert.AreEqual(-1.25, AlvysDeduction.Amount, 'The logged deduction should carry the requested amount.');
         Assert.AreEqual('Test', AlvysDeduction.Category, 'The logged deduction should carry the requested category.');
@@ -115,6 +116,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(AlvysDeduction.FindLast(), 'The created deduction should be logged in the Alvys Deduction table.');
         Assert.AreEqual('DR2516627925609719241', AlvysDeduction."Driver Id", 'The logged deduction should carry the driver Id.');
         Assert.AreEqual('', AlvysDeduction."Truck Id", 'A driver deduction should not carry a truck Id.');
+        Assert.AreEqual('', AlvysDeduction."Truck Number", 'A driver deduction should not carry a truck number.');
         Assert.AreEqual(-2.5, AlvysDeduction.Amount, 'The logged deduction should carry the requested amount.');
     end;
 
@@ -137,7 +139,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         SalesInvHeader."Dimension Set ID" := TractorCodeDimensionSetID('1');
 
         // [WHEN] A deduction is created for the posted invoice
-        DeductionID := AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - posted invoice deduction');
+        DeductionID := AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - posted invoice deduction', false);
 
         // [THEN] The deduction is created against the truck the dimension resolves to
         Assert.AreNotEqual('', DeductionID, 'CreateDeductionForTruck should return the Alvys deduction Id.');
@@ -145,6 +147,9 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(AlvysDeduction.FindLast(), 'The created deduction should be logged in the Alvys Deduction table.');
         Assert.AreEqual('TR2516627931370728085', AlvysDeduction."Truck Id", 'The truck should be resolved from the tractor code dimension on the posted invoice.');
         Assert.AreEqual(-4.5, AlvysDeduction.Amount, 'The logged deduction should carry the requested amount.');
+
+        // [THEN] The truck number the Id was resolved from is the tractor code on the posted invoice
+        Assert.AreEqual('1', AlvysDeduction."Truck Number", 'The deduction should carry the tractor code dimension value from the posted invoice as its truck number.');
 
         // [THEN] Both the originating document and the posted invoice are recorded on it
         Assert.AreEqual(SalesHeader."Document Type"::Order, AlvysDeduction."Document Type", 'The deduction should carry the document type it was posted from.');
@@ -155,25 +160,24 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     [Test]
     procedure CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails()
     var
-        AlvysSetup: Record "BAASI Alvys Sales Setup";
         SalesHeader: Record "Sales Header";
         SalesInvHeader: Record "Sales Invoice Header";
     begin
         // [SCENARIO] A posted invoice without the tractor code dimension has no truck to deduct from.
         Initialize();
 
-        // [GIVEN] An order and an invoice whose dimension set does not hold the tractor code
+        // [GIVEN] An order and an invoice that carry no dimensions at all
         SalesHeader."Document Type" := SalesHeader."Document Type"::Order;
         SalesHeader."No." := 'ALVYS-TEST-ORD';
         SalesInvHeader."No." := 'ALVYS-TEST-INV';
         SalesInvHeader."Dimension Set ID" := 0;
 
         // [WHEN] A deduction is created for the posted invoice
-        asserterror AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - no tractor code');
+        asserterror AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - no tractor code', false);
 
-        // [THEN] The call is rejected before it reaches Alvys
-        AlvysSetup.Get();
-        Assert.ExpectedError(StrSubstNo('The document does not have a value for the %1 dimension.', AlvysSetup."Tractor Code Dimension"));
+        // [THEN] The call is rejected before it reaches Alvys: without dimensions there is no
+        // tractor code, so the truck number resolves to blank
+        Assert.ExpectedError('The truck number cannot be blank.');
     end;
 
     [Test]
@@ -183,10 +187,54 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Initialize();
 
         // [WHEN] A deduction is created with a blank truck Id
-        asserterror AlvysSalesMgt.CreateDeductionForTruck('', WorkDate(), -1.25, 'Test', 'BC test app - blank truck');
+        asserterror AlvysSalesMgt.CreateDeductionForTruck('', '1', WorkDate(), -1.25, 'Test', 'BC test app - blank truck');
 
         // [THEN] The call is rejected before it reaches Alvys
         Assert.ExpectedError('The TruckId cannot be blank when creating a deduction.');
+    end;
+
+    [Test]
+    procedure MapDocumentTypeMapsOrdersAndInvoices()
+    var
+        SalesHeader: Record "Sales Header";
+    begin
+        // [SCENARIO] The sales document types that have a counterpart in Alvys are mapped onto the
+        // document type stored on the logged entry.
+        Initialize();
+
+        // [WHEN] An order and an invoice are mapped
+        // [THEN] Each maps onto its matching entry document type
+        Assert.AreEqual(
+            Enum::"BAASI Alvys Entry Doc. Type"::"Sales Order",
+            AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::Order),
+            'A sales order should map to the Sales Order entry document type.');
+        Assert.AreEqual(
+            Enum::"BAASI Alvys Entry Doc. Type"::"Sales Invoice",
+            AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::Invoice),
+            'A sales invoice should map to the Sales Invoice entry document type.');
+    end;
+
+    [Test]
+    procedure MapDocumentTypeRejectsUnsupportedDocumentTypes()
+    var
+        SalesHeader: Record "Sales Header";
+    begin
+        // [SCENARIO] Sales document types with no counterpart in Alvys are rejected rather than
+        // silently logged against the wrong type. Quote doubles as the placeholder for calls that
+        // have no sales document behind them, so it must not map to a real entry type either.
+        Initialize();
+
+        // [WHEN] A quote is mapped
+        asserterror AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::Quote);
+
+        // [THEN] The mapping is rejected
+        Assert.ExpectedError('Sales documents of type Quote are not supported. Only orders and invoices can be sent to Alvys.');
+
+        // [WHEN] A credit memo is mapped
+        asserterror AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::"Credit Memo");
+
+        // [THEN] The mapping is rejected
+        Assert.ExpectedError('Sales documents of type Credit Memo are not supported. Only orders and invoices can be sent to Alvys.');
     end;
 
     [Test]
@@ -201,7 +249,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Initialize();
 
         // [GIVEN] A deduction created in Alvys
-        DeductionID := AlvysSalesMgt.CreateDeductionForTruck('TR2516627931370728085', WorkDate(), -3.75, 'Test', 'BC test app - read back');
+        DeductionID := AlvysSalesMgt.CreateDeductionForTruck('TR2516627931370728085', '1', WorkDate(), -3.75, 'Test', 'BC test app - read back');
 
         // [WHEN] The deduction is read back by Id
         ResponseObj := AlvysSalesMgt.GetDeduction(DeductionID);
@@ -242,6 +290,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         AlvysSetup.TestField("Integration URL");
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
+        AlvysSetup.TestField("Tractor Code Dimension");
         AlvysSetup.SetAccessToken('');
         AlvysSetup."Access Token Expiry Date" := 0DT;
         AlvysSetup.Modify();

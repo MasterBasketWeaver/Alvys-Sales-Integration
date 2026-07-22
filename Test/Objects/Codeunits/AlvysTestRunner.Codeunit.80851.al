@@ -12,10 +12,11 @@ codeunit 80851 "BAASIT Alvys Test Runner"
 
     trigger OnRun()
     begin
-        // All Alvys tests belong in codeunit "BAASIT Alvys Sales Tests" -- add new [Test] methods
-        // there rather than creating further test codeunits, so this stays a single explicit line
-        // and no test can be silently left out of a run.
+        // Every test codeunit must be listed here explicitly, so no test can be silently left out
+        // of a run: Alvys API tests in "BAASIT Alvys Sales Tests", the Fleetrock-to-Alvys
+        // round trip in "BAASIT Fleetrock E2E Tests".
         Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
+        Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
