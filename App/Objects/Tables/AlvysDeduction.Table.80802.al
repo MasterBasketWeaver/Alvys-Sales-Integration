@@ -9,90 +9,81 @@ table 80802 "BAASI Alvys Deduction"
     {
         field(1; "Entry No."; Integer)
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(2; Id; Text[50])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(3; Type; Text[30])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(4; "Group Id"; Text[50])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(5; Description; Text[250])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(6; Category; Text[100])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(7; Amount; Decimal)
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
-        field(8; "Currency Code"; Integer)
+        field(8; "Currency Id"; Integer)
         {
-            DataClassification = CustomerContent;
             Editable = false;
             Tooltip = 'The ISO 4217 numeric currency code returned by Alvys.';
         }
         field(9; "Truck Id"; Text[50])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(10; "Date"; Date)
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(11; "Is Paid"; Boolean)
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
-        field(12; "Created At"; DateTime)
+        field(12; "Created By"; Code[50])
         {
-            DataClassification = CustomerContent;
             Editable = false;
-        }
-        field(13; "Created By"; Text[100])
-        {
-            DataClassification = CustomerContent;
-            Editable = false;
+            FieldClass = FlowField;
+            CalcFormula = Lookup(User."User Name" where("User Security ID" = field(SystemCreatedBy)));
         }
         field(14; "Driver Id"; Text[50])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(20; "Document Type"; Enum "Sales Document Type")
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(21; "Document No."; Code[20])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(23; "Posted Document No."; Code[20])
         {
-            DataClassification = CustomerContent;
             Editable = false;
             Tooltip = 'The number of the posted Sales Invoice the deduction ended up on. Blank while the originating document is still unposted.';
+        }
+        field(30; "Alvys Created At"; DateTime)
+        {
+            Editable = false;
+            Tooltip = 'The date and time the deduction was created in Alvys.';
+        }
+        field(31; "Alvys Created By"; Code[100])
+        {
+            Editable = false;
+            Tooltip = 'The user who created the deduction in Alvys.';
         }
     }
 

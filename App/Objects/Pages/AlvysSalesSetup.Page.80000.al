@@ -10,40 +10,52 @@ page 80800 "BAASI Alvys Sales Setup"
     {
         area(Content)
         {
-
-            group(Integration)
+            group(Options)
             {
-                field("Integration URL"; Rec."Integration URL")
+                field(Enabled; Rec.Enabled) { }
+                Group(Dimensions)
                 {
-                    ShowMandatory = true;
+                    // field("Entity Code Dimension"; Rec."Entity Code Dimension")
+                    // {
+                    //     ShowMandatory = true;
+                    // }
+                    field("Tractor Code Dimension"; Rec."Tractor Code Dimension")
+                    {
+                        ShowMandatory = true;
+                    }
                 }
-                field("Client ID"; Rec."Client ID")
+                group(Integration)
                 {
-                    ShowMandatory = true;
-                }
-                field("Client Secret"; Rec."Client Secret")
-                {
-                    ShowMandatory = true;
-                }
-                field("Tractor Code Dimension"; Rec."Tractor Code Dimension")
-                {
-                    ShowMandatory = true;
+
+                    field("Integration URL"; Rec."Integration URL")
+                    {
+                        ShowMandatory = true;
+                    }
+                    field("Client ID"; Rec."Client ID")
+                    {
+                        ShowMandatory = true;
+                    }
+                    field("Client Secret"; Rec."Client Secret")
+                    {
+                        ShowMandatory = true;
+                    }
+
+                    group(Token)
+                    {
+                        field("Access Token"; AccessTokenTxt)
+                        {
+                            Caption = 'Access Token';
+                            ToolTip = 'The access token used to authenticate requests to the Alvys API.';
+                            Editable = false;
+                            ExtendedDatatype = Masked;
+                        }
+                        field("Access Token Expiry Date"; Rec."Access Token Expiry Date")
+                        {
+                            Editable = false;
+                        }
+                    }
                 }
 
-                group(Token)
-                {
-                    field("Access Token"; AccessTokenTxt)
-                    {
-                        Caption = 'Access Token';
-                        ToolTip = 'The access token used to authenticate requests to the Alvys API.';
-                        Editable = false;
-                        ExtendedDatatype = Masked;
-                    }
-                    field("Access Token Expiry Date"; Rec."Access Token Expiry Date")
-                    {
-                        Editable = false;
-                    }
-                }
             }
         }
     }

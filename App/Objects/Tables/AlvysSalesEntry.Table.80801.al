@@ -9,51 +9,41 @@ table 80801 "BAASI Alvys Sales Entry"
     {
         field(1; "Entry No."; Integer)
         {
-            DataClassification = CustomerContent;
-            Editable = false;
-        }
-        field(2; "User ID"; Code[50])
-        {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(3; "Document Type"; Enum "BAASI Alvys Entry Doc. Type")
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(4; "Document No."; Code[20])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(5; URL; Text[1024])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(6; Method; Text[20])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(7; "Request Body"; Blob)
         {
-            DataClassification = CustomerContent;
         }
         field(8; Response; Text[2048])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
         field(9; "Error Message"; Text[512])
         {
-            DataClassification = CustomerContent;
             Editable = false;
         }
-        field(10; "Error Stack"; Blob)
+        field(10; "Error Stack"; Blob) { }
+        field(11; "Created By"; Code[50])
         {
-            DataClassification = CustomerContent;
+            Editable = false;
+            FieldClass = FlowField;
+            CalcFormula = Lookup(User."User Name" where("User Security ID" = field(SystemCreatedBy)));
         }
     }
 

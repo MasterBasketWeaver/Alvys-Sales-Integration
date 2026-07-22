@@ -17,7 +17,8 @@ page 80801 "BAASI Alvys Sales Entries"
             repeater(Entries)
             {
                 field("Entry No."; Rec."Entry No.") { }
-                field("User ID"; Rec."User ID") { }
+                field("Created At"; Rec.SystemCreatedAt) { }
+                field("Created By"; Rec."Created By") { }
                 field("Document Type"; Rec."Document Type") { }
                 field("Document No."; Rec."Document No.") { }
                 field(Method; Rec.Method) { }

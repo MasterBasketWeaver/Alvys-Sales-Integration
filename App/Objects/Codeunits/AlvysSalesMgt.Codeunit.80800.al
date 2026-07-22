@@ -14,6 +14,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysSetup.TestField("Integration URL");
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
+        // AlvysSetup.TestField("Entity Code Dimension");
         LoadedSetup := true;
     end;
 
@@ -117,27 +118,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
 
-    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
-    begin
-        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description));
-    end;
+
 
     /// <summary>
     /// Creates a deduction for the truck on a posted sales document. Both headers are needed: the
     /// truck and the dimension come off the posted invoice, while the sales header is what says
     /// which document the invoice was posted from, so the deduction can be traced back to it.
     /// </summary>
-    procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
+    procedure CreateDeductionForTruck(var SalesHeader: Record "Sales Header"; var SalesInvHeader: Record "Sales Invoice Header"; Date: Date; Amount: Decimal; Category: Text; Description: Text; PreviewMode: Boolean): Text
     var
         TruckID: Text;
     begin
         TruckID := GetTruckID(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No.");
-        exit(CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No."));
+        exit(CreateDeductionForTruck(TruckID, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No.", PreviewMode));
     end;
 
-    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
+    procedure CreateDeductionForTruck(TruckID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]; PreviewMode: Boolean): Text
     begin
-        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo));
+        exit(CreateDeduction(TruckIdTok, TruckID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo, PreviewMode));
     end;
 
     procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text): Text
@@ -147,7 +145,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     procedure CreateDeductionForDriver(DriverID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     begin
-        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo));
+        exit(CreateDeduction(DriverIdTok, DriverID, Date, Amount, Category, Description, DocType, DocNo, PostedDocNo, false));
     end;
 
     /// <summary>
@@ -164,12 +162,14 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(InsertDeduction(ResponseObj));
     end;
 
-    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
+    local procedure CreateDeduction(AssetIdFieldName: Text; AssetID: Text; Date: Date; Amount: Decimal; Category: Text; Description: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]; PreviewMode: Boolean): Text
     var
         JsonBody, ResponseObj : JsonObject;
     begin
         PrepareDeductionBody(AssetIdFieldName, AssetID, Date, Amount, Category, Description, JsonBody);
         ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, DocType, DocNo, PostedDocNo);
+        if PreviewMode then
+            DeleteDeduction(JsonMgt.GetJsonValueAsText(ResponseObj, 'Id'));
         exit(InsertDeduction(ResponseObj, DocType, DocNo, PostedDocNo));
     end;
 
@@ -183,6 +183,20 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('Category', Category);
         JsonBody.Add('Description', Description);
         JsonBody.Add(AssetIdFieldName, AssetID);
+    end;
+
+
+
+    local procedure DeleteDeduction(DeductionID: Text): Text
+    var
+        JsonBody, ResponseObj : JsonObject;
+        s: Text;
+    begin
+        if DeductionID = '' then
+            exit('');
+        ResponseObj := SendAPIRequest('DELETE', AlvysSetup."Integration URL" + 'deductions/' + DeductionID, 'application/json', JsonBody);
+        ResponseObj.WriteTo(s);
+        exit(s);
     end;
 
 
@@ -237,14 +251,14 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         if ResponseObj.Get('Amount', JsonTkn) then begin
             AmountObj := JsonTkn.AsObject();
             AlvysDeduction.Amount := JsonMgt.GetJsonValueAsDecimal(AmountObj, 'Amount');
-            AlvysDeduction."Currency Code" := JsonMgt.GetJsonValueAsInteger(AmountObj, 'Currency');
+            AlvysDeduction."Currency Id" := JsonMgt.GetJsonValueAsInteger(AmountObj, 'Currency');
         end;
         AlvysDeduction."Truck Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'TruckId'), 1, MaxStrLen(AlvysDeduction."Truck Id"));
         AlvysDeduction."Driver Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'DriverId'), 1, MaxStrLen(AlvysDeduction."Driver Id"));
         AlvysDeduction.Date := DT2Date(JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'Date'));
         AlvysDeduction."Is Paid" := JsonMgt.GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
-        AlvysDeduction."Created At" := JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'CreatedAt');
-        AlvysDeduction."Created By" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'CreatedBy'), 1, MaxStrLen(AlvysDeduction."Created By"));
+        AlvysDeduction."Alvys Created At" := JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'CreatedAt');
+        AlvysDeduction."Alvys Created By" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'CreatedBy'), 1, MaxStrLen(AlvysDeduction."Created By"));
         AlvysDeduction."Document Type" := DocType;
         AlvysDeduction."Document No." := DocNo;
         AlvysDeduction."Posted Document No." := PostedDocNo;
@@ -257,11 +271,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         DimSetEntry: Record "Dimension Set Entry";
     begin
+        if DimSetID = 0 then
+            exit('');
         GetAndCheckSetup();
         AlvysSetup.TestField("Tractor Code Dimension");
-        DimSetEntry.SetRange("Dimension Set ID", DimSetID);
-        DimSetEntry.SetRange("Dimension Code", AlvysSetup."Tractor Code Dimension");
-        if not DimSetEntry.FindFirst() then
+        if not DimSetEntry.Get(DimSetID, AlvysSetup."Tractor Code Dimension") then
             Error(MissingTractorCodeErr, AlvysSetup."Tractor Code Dimension");
         exit(DimSetEntry."Dimension Value Code");
     end;
@@ -374,7 +388,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             EntryNo := AlvysEntry."Entry No.";
         AlvysEntry.Init();
         AlvysEntry."Entry No." := EntryNo + 1;
-        AlvysEntry."User ID" := CopyStr(UserId(), 1, MaxStrLen(AlvysEntry."User ID"));
         AlvysEntry."Document Type" := DocType;
         AlvysEntry."Document No." := DocNo;
         AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
@@ -388,6 +401,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         end;
         AlvysEntry.Insert(true);
     end;
+
+
+
+
+
 
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";

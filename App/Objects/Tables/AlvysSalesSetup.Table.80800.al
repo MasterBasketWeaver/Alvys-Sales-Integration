@@ -43,6 +43,17 @@ table 80800 "BAASI Alvys Sales Setup"
             TableRelation = Dimension.Code;
             Tooltip = 'The dimension whose value is used as the truck number when calling the Alvys API.';
         }
+        // field(8; "Entity Code Dimension"; Code[20])
+        // {
+        //     DataClassification = CustomerContent;
+        //     TableRelation = Dimension.Code;
+        //     Tooltip = 'The dimension whose value is used as the entity code when calling the Alvys API.';
+        // }
+        field(10; "Enabled"; Boolean)
+        {
+            DataClassification = CustomerContent;
+            Tooltip = 'Specifies if the integration is enabled or not.';
+        }
     }
     keys
     {

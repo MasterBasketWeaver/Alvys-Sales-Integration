@@ -4,7 +4,7 @@ codeunit 80801 "BAASI Install"
 
     trigger OnInstallAppPerCompany()
     begin
-        this.RunInstallCode();
+        RunInstallCode();
     end;
 
     procedure RunInstallCode()
