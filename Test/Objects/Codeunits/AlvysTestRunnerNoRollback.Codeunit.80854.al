@@ -1,21 +1,18 @@
-codeunit 80851 "BAASIT Alvys Test Runner"
+codeunit 80854 "BAASIT Test Runner No Rollback"
 {
-    // Runs the Alvys test codeunits and logs the outcome of every test method to the
-    // "BAASIT Test Result" table, so the whole suite can be run and read from inside Business
-    // Central -- from page "BAASIT Alvys Test Results" -- without the AL Test Tool.
-    //
-    // Implementing OnAfterTestRun also suppresses the platform's own results message, which is
-    // what lets the calling page report the run itself.
+    // The no-rollback twin of codeunit "BAASIT Alvys Test Runner": TestIsolation is a compile-time
+    // property, so keeping data after a run needs its own runner. Everything a run creates stays
+    // in Business Central, and the tests read the keep-data flag (codeunit "BAASIT Test Mode") to
+    // also leave their repair orders in Fleetrock and their deductions in Alvys. Use it to inspect
+    // the documents a run produces; the regular runner remains the default.
 
     Subtype = TestRunner;
-    TestIsolation = Codeunit;
+    TestIsolation = Disabled;
 
     trigger OnRun()
     begin
-        // Every test codeunit must be listed here explicitly, so no test can be silently left out
-        // of a run: Alvys API tests in "BAASIT Alvys Sales Tests", the Fleetrock-to-Alvys
-        // round trip in "BAASIT Fleetrock E2E Tests". Keep this list identical to the one in
-        // codeunit "BAASIT Test Runner No Rollback", so both runners always cover the same suite.
+        // Keep this list identical to the one in codeunit "BAASIT Alvys Test Runner", so both
+        // runners always cover the same suite.
         Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
         Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
     end;
@@ -31,8 +28,6 @@ codeunit 80851 "BAASIT Alvys Test Runner"
         TestResult: Record "BAASIT Test Result";
         FinishTime: DateTime;
     begin
-        // A blank method name is the callback for the test codeunit as a whole; the individual
-        // methods have already been logged by then, so there is nothing to add.
         if FunctionName = '' then
             exit;
 

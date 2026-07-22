@@ -7,7 +7,9 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
     // Fleetrock Integration job queue codeunit, posted, and verified all the way to the truck
     // deduction in Alvys. Business Central data is rolled back when the test run ends, the
     // repair order is walked back from Invoiced and deleted in Fleetrock, and the deduction is
-    // deleted from Alvys, so nothing accumulates in either tenant.
+    // deleted from Alvys, so nothing accumulates in either tenant. When the suite runs through
+    // the no-rollback runner (codeunit "BAASIT Test Runner No Rollback"), the external clean-up
+    // is skipped too, so the documents can be inspected in all three systems afterwards.
 
     Subtype = Test;
     TestPermissions = Disabled;
@@ -142,6 +144,11 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         Assert.IsTrue(ResponseObj.Get('Amount', JsonTkn), 'The Alvys deduction should carry an amount.');
         AmountObj := JsonTkn.AsObject();
         Assert.AreEqual(-205.0, JsonMgt.GetJsonValueAsDecimal(AmountObj, 'Amount'), 'The Alvys deduction amount should be the negated invoice total.');
+
+        // On a keep-data run the external clean-up is skipped along with the rollback, so the
+        // repair order, the documents and the deduction survive for inspection.
+        if TestMode.GetKeepData() then
+            exit;
 
         // [THEN] The deduction can be deleted from Alvys again, so test runs do not accumulate
         // deductions in the tenant; the logged BC record rolls back with the rest of the test data
@@ -329,4 +336,5 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
         RestAPIMgt: Codeunit "FRI REST API Mgt.";
+        TestMode: Codeunit "BAASIT Test Mode";
 }

@@ -12,5 +12,7 @@ permissionset 80850 "BAASIT Test Perms."
         codeunit "BAASIT Alvys Sales Tests" = X,
         codeunit "BAASIT Fleetrock E2E Tests" = X,
         codeunit "BAASIT Alvys Test Runner" = X,
+        codeunit "BAASIT Test Runner No Rollback" = X,
+        codeunit "BAASIT Test Mode" = X,
         codeunit "BAASIT Test Run Mgt." = X;
 }

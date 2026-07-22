@@ -54,6 +54,25 @@ page 80852 "BAASIT Alvys Test Run API"
         ActionContext.SetResultCode(WebServiceActionResultCode::Updated);
     end;
 
+    /// <summary>
+    /// As run, but without rolling anything back: the documents stay in Business Central, and the
+    /// repair order and deduction stay in Fleetrock and Alvys, so the run's results can be
+    /// inspected afterwards.
+    /// </summary>
+    [ServiceEnabled]
+    procedure runKeepData(var ActionContext: WebServiceActionContext)
+    var
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+    begin
+        TestRunMgt.RunSuite(true);
+        Rec.GetSingleton();
+
+        ActionContext.SetObjectType(ObjectType::Page);
+        ActionContext.SetObjectId(Page::"BAASIT Alvys Test Run API");
+        ActionContext.AddEntityKey(Rec.FieldNo(SystemId), Rec.SystemId);
+        ActionContext.SetResultCode(WebServiceActionResultCode::Updated);
+    end;
+
     trigger OnOpenPage()
     begin
         // Make sure the singleton exists, so the entity set is never empty for a caller that is

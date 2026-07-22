@@ -45,7 +45,19 @@ page 80851 "BAASIT Alvys Test Results"
 
                 trigger OnAction()
                 begin
-                    this.RunTestSuite();
+                    this.RunTestSuite(false);
+                end;
+            }
+            action(RunTestsKeepData)
+            {
+                ApplicationArea = All;
+                Caption = 'Run Tests (Keep Data)';
+                Tooltip = 'Run every Alvys test codeunit without rolling anything back: the documents stay in Business Central, and the repair order and deduction stay in Fleetrock and Alvys, so the run''s results can be inspected.';
+                Image = TestDatabase;
+
+                trigger OnAction()
+                begin
+                    this.RunTestSuite(true);
                 end;
             }
             action(ClearResults)
@@ -65,6 +77,7 @@ page 80851 "BAASIT Alvys Test Results"
         area(Promoted)
         {
             actionref(RunTests_Promoted; RunTests) { }
+            actionref(RunTestsKeepData_Promoted; RunTestsKeepData) { }
             actionref(ClearResults_Promoted; ClearResults) { }
         }
     }
@@ -81,12 +94,12 @@ page 80851 "BAASIT Alvys Test Results"
     /// Runs the suite through the shared run codeunit, so a run started here is identical to one
     /// triggered over the API, then reports the summary it recorded.
     /// </summary>
-    local procedure RunTestSuite()
+    local procedure RunTestSuite(KeepData: Boolean)
     var
         TestRun: Record "BAASIT Test Run";
         TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
     begin
-        TestRunMgt.RunSuite();
+        TestRunMgt.RunSuite(KeepData);
         TestRun.GetSingleton();
 
         CurrPage.Update(false);

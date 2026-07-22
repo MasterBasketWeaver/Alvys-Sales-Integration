@@ -8,19 +8,35 @@ codeunit 80852 "BAASIT Test Run Mgt."
     /// summary on the test run singleton.
     /// </summary>
     procedure RunSuite()
+    begin
+        RunSuite(false);
+    end;
+
+    /// <summary>
+    /// As RunSuite, but with a choice of runner: with KeepData the suite runs through the
+    /// no-rollback runner, so everything the run creates stays in Business Central, and the tests
+    /// leave their repair orders in Fleetrock and their deductions in Alvys as well.
+    /// </summary>
+    procedure RunSuite(KeepData: Boolean)
     var
         TestResult: Record "BAASIT Test Result";
         TestRun: Record "BAASIT Test Run";
+        TestMode: Codeunit "BAASIT Test Mode";
         StartedAt: DateTime;
     begin
         TestResult.DeleteAll();
         TestRun.GetSingleton();
         StartedAt := CurrentDateTime();
+        TestMode.SetKeepData(KeepData);
 
         // A test runner cannot start inside the write transaction opened above.
         Commit();
 
-        Codeunit.Run(Codeunit::"BAASIT Alvys Test Runner");
+        if KeepData then
+            Codeunit.Run(Codeunit::"BAASIT Test Runner No Rollback")
+        else
+            Codeunit.Run(Codeunit::"BAASIT Alvys Test Runner");
+        TestMode.SetKeepData(false);
 
         TestRun."Started At" := StartedAt;
         TestRun."Finished At" := CurrentDateTime();
