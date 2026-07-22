@@ -280,33 +280,217 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     procedure InboundAPIPageLogsEntryAsInbound()
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
-        RequestBody: Text;
     begin
-        // [SCENARIO] A driver pay call from Alvys is logged to the entry table as an inbound entry.
+        // [SCENARIO] A driver pay call from Alvys is logged to the entry table as an inbound entry,
+        // with the method and URL of the endpoint it arrived on.
         Initialize();
-        RequestBody := DriverPayPayload();
 
         // [WHEN] Alvys posts a driver pay payload to the API page
-        InsertInboundEntry('PS-INV101026', RequestBody, AlvysEntry);
+        InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry);
 
-        // [THEN] The entry is logged against the inbound direction, with the payload kept intact
+        // [THEN] The entry is logged against the inbound direction, on the apply-deduction endpoint
         Assert.AreEqual(AlvysEntry.Direction::Inbound, AlvysEntry.Direction, 'An entry created through the API page should be inbound.');
-        Assert.AreEqual('POST', AlvysEntry.Method, 'The method sent by Alvys should be logged.');
-        Assert.AreEqual('PS-INV101026', AlvysEntry."Document No.", 'The document number sent by Alvys should be logged.');
-        Assert.AreEqual(RequestBody, AlvysEntry.GetRequestBody(), 'The inbound payload should be stored on the entry unchanged.');
+        Assert.AreEqual('POST', AlvysEntry.Method, 'The inbound entry should be logged with the method of the endpoint.');
+        Assert.AreEqual('/api/tanager/alvys/v1.0/alvysApplyDeductions', AlvysEntry.URL, 'The inbound entry should be logged with the URL of the endpoint.');
+        Assert.AreEqual('', AlvysEntry."Error Message", 'A payload that matches a posted invoice should not log an error.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageRebuildsPayloadFromParameters()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        JsonMgt: Codeunit "BAAPI Json Mgt.";
+        RequestBody: JsonObject;
+        DeductionId: Text;
+    begin
+        // [SCENARIO] The page takes the six driver pay fields rather than a payload, so the request
+        // body on the entry is rebuilt from them and has to carry every one back.
+        Initialize();
+        DeductionId := LoggedDeductionId(PostedSalesInvoiceNo());
+
+        // [WHEN] Alvys posts a driver pay payload to the API page
+        InsertInboundEntry(DeductionId, AlvysEntry);
+
+        // [THEN] Every parameter is logged, under the field name Alvys sends it as
+        Assert.IsTrue(RequestBody.ReadFrom(AlvysEntry.GetRequestBody()), 'The logged request body should be valid JSON.');
+        Assert.AreEqual(DeductionId, JsonMgt.GetJsonValueAsText(RequestBody, 'DeductionId'), 'The logged payload should carry the deduction Id.');
+        Assert.AreEqual('TR2516627931370728085', JsonMgt.GetJsonValueAsText(RequestBody, 'TruckId'), 'The logged payload should carry the truck Id.');
+        Assert.AreEqual('1', JsonMgt.GetJsonValueAsText(RequestBody, 'TruckNumber'), 'The logged payload should carry the truck number.');
+        Assert.AreEqual(-55.0, JsonMgt.GetJsonValueAsDecimal(RequestBody, 'Amount'), 'The logged payload should carry the amount.');
+        Assert.AreEqual(Format(WorkDate(), 0, 9), JsonMgt.GetJsonValueAsText(RequestBody, 'SettlementDate'), 'The logged payload should carry the settlement date.');
+        Assert.AreEqual('Settlement 12345', JsonMgt.GetJsonValueAsText(RequestBody, 'Description'), 'The logged payload should carry the description.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageMatchesDeductionToPostedInvoice()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        PostedDocumentNo: Code[20];
+    begin
+        // [SCENARIO] Alvys sends the deduction Id and nothing that identifies the receivable, so the
+        // deduction is what the posted invoice on the entry is resolved from.
+        Initialize();
+
+        // [GIVEN] A deduction logged against a posted sales invoice
+        PostedDocumentNo := PostedSalesInvoiceNo();
+
+        // [WHEN] Alvys settles that deduction
+        InsertInboundEntry(LoggedDeductionId(PostedDocumentNo), AlvysEntry);
+
+        // [THEN] The entry points at the posted invoice the deduction was raised against
+        Assert.AreEqual(AlvysEntry."Document Type"::"Posted Sales Invoice", AlvysEntry."Document Type", 'An apply-deduction entry should be logged against a posted sales invoice.');
+        Assert.AreEqual(PostedDocumentNo, AlvysEntry."Document No.", 'The entry should carry the posted invoice the deduction was raised against.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageLogsUnknownDeduction()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] A payload that cannot be matched is still logged, since the entry table is the
+        // record of what Alvys sent. The reason goes on the entry instead of the document number.
+        Initialize();
+
+        // [WHEN] Alvys settles a deduction Business Central has never seen
+        InsertInboundEntry('4ba92c0d-736d-4b44-85d0-12c9fc9bad71', AlvysEntry);
+
+        // [THEN] The call is logged, with no document and the reason it could not be matched
+        Assert.AreNotEqual(0, AlvysEntry."Entry No.", 'An unmatched payload should still be logged.');
+        Assert.AreEqual('', AlvysEntry."Document No.", 'An unmatched payload should not be pointed at a document.');
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('4ba92c0d-736d-4b44-85d0-12c9fc9bad71'), 'The error should name the deduction that could not be found.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageLogsUnpostedDeduction()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        DeductionId: Text;
+    begin
+        // [SCENARIO] A deduction still sitting on an unposted document has no posted invoice for the
+        // settlement to apply against, so the entry says so rather than guessing at a document.
+        Initialize();
+
+        // [GIVEN] A deduction whose originating document has not been posted
+        DeductionId := LoggedDeductionId('');
+
+        // [WHEN] Alvys settles it
+        InsertInboundEntry(DeductionId, AlvysEntry);
+
+        // [THEN] The call is logged, with no document and the reason it could not be matched
+        Assert.AreEqual('', AlvysEntry."Document No.", 'A deduction with no posted invoice should not be pointed at a document.');
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('has not been posted'), 'The error should say the originating document is unposted.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageLogsBlankDeduction()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] A payload with no deduction Id has nothing to match on. It is logged with the
+        // reason, the same as any other payload that cannot be matched, so the API page refuses it.
+        Initialize();
+
+        // [WHEN] A payload arrives with no deduction Id
+        InsertInboundEntry('', AlvysEntry);
+
+        // [THEN] The call is logged, with no document and the reason it could not be matched
+        Assert.AreNotEqual(0, AlvysEntry."Entry No.", 'A payload with no deduction Id should still be logged.');
+        Assert.AreEqual('', AlvysEntry."Document No.", 'A payload with no deduction Id should not be pointed at a document.');
+        Assert.AreEqual('The deduction Id cannot be blank.', AlvysEntry."Error Message", 'The error should say the deduction Id is blank.');
+    end;
+
+    /// <summary>
+    /// The API page refuses a payload only where the codeunit marked the failure retryable, so
+    /// every other payload is answered 201 with the reason on the entry. Which HTTP status comes
+    /// back is a page-level concern and cannot be reached from a test session; the OData contract
+    /// test covers that. What is checked here is the decision behind it.
+    /// </summary>
+    [Test]
+    procedure MatchedDeductionLeavesNoErrorToRefuseOn()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        Retryable: Boolean;
+    begin
+        // [SCENARIO] A payload that does match a posted invoice carries no error, so the API page
+        // has nothing to refuse it on and Alvys is answered 201.
+        Initialize();
+
+        // [WHEN] Alvys settles a deduction that is linked to a posted invoice
+        InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry, Retryable);
+
+        // [THEN] The entry carries a document and no error
+        Assert.AreNotEqual('', AlvysEntry."Document No.", 'A matched deduction should be pointed at its posted invoice.');
+        Assert.AreEqual('', AlvysEntry."Error Message", 'A matched deduction should leave nothing for the page to refuse on.');
+        Assert.IsFalse(Retryable, 'A payload that succeeded should not be marked for retry.');
+    end;
+
+    [Test]
+    procedure UnpostedDeductionIsRetryable()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        Retryable: Boolean;
+    begin
+        // [SCENARIO] A deduction whose document has not been posted will match once it is, so the
+        // same payload sent again can succeed. That is the one failure Alvys is asked to retry.
+        Initialize();
+
+        // [WHEN] Alvys settles a deduction that is not on a posted invoice yet
+        InsertInboundEntry(LoggedDeductionId(''), AlvysEntry, Retryable);
+
+        // [THEN] The failure is marked retryable, so the page refuses the call
+        Assert.AreNotEqual('', AlvysEntry."Error Message", 'An unposted deduction should log a reason.');
+        Assert.IsTrue(Retryable, 'An unposted deduction should be retryable: posting the document makes the same payload succeed.');
+    end;
+
+    [Test]
+    procedure UnmatchableDeductionIsNotRetryable()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        Retryable: Boolean;
+    begin
+        // [SCENARIO] A deduction Business Central has no record of will never match, however many
+        // times Alvys sends it. Refusing it would buy nothing but a retry loop and a duplicate log
+        // row for each attempt, so it is accepted with the reason on the entry instead.
+        Initialize();
+
+        // [WHEN] Alvys settles a deduction that was never recorded
+        InsertInboundEntry('4ba92c0d-736d-4b44-85d0-12c9fc9bad71', AlvysEntry, Retryable);
+
+        // [THEN] The failure is not marked retryable, so the page accepts the call and logs it
+        Assert.AreNotEqual('', AlvysEntry."Error Message", 'An unknown deduction should log a reason.');
+        Assert.IsFalse(Retryable, 'An unknown deduction should not be retryable: it can never match.');
+    end;
+
+    [Test]
+    procedure BlankDeductionIsNotRetryable()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        Retryable: Boolean;
+    begin
+        // [SCENARIO] A payload with no deduction Id has nothing to match on and never will, so it
+        // is treated the same as one naming a deduction that does not exist.
+        Initialize();
+
+        // [WHEN] A payload arrives with no deduction Id
+        InsertInboundEntry('', AlvysEntry, Retryable);
+
+        // [THEN] The failure is not marked retryable
+        Assert.IsFalse(Retryable, 'A blank deduction Id should not be retryable: resending it changes nothing.');
     end;
 
     [Test]
     procedure InboundAPIPageAssignsNextEntryNo()
     var
         FirstEntry, SecondEntry : Record "BAASI Alvys Sales Entry";
+        DeductionId: Text;
     begin
         // [SCENARIO] The API page numbers inbound entries itself, since the caller cannot.
         Initialize();
+        DeductionId := LoggedDeductionId(PostedSalesInvoiceNo());
 
         // [WHEN] Two driver pay payloads arrive
-        InsertInboundEntry('PS-INV101026', DriverPayPayload(), FirstEntry);
-        InsertInboundEntry('PS-INV101027', DriverPayPayload(), SecondEntry);
+        InsertInboundEntry(DeductionId, FirstEntry);
+        InsertInboundEntry(DeductionId, SecondEntry);
 
         // [THEN] Each entry is given the next number in the log
         Assert.AreNotEqual(0, FirstEntry."Entry No.", 'An inbound entry should be given an entry number.');
@@ -343,7 +527,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
 
         // [GIVEN] An outbound call and an inbound call have both been logged
         AlvysSalesMgt.GetTruckID('1');
-        InsertInboundEntry('PS-INV101026', DriverPayPayload(), InboundEntry);
+        InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), InboundEntry);
         InboundEntryNo := InboundEntry."Entry No.";
 
         // [WHEN] The log is read through the filter the API page applies
@@ -360,30 +544,68 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     end;
 
     /// <summary>
-    /// Logs a payload the way the API page does when Alvys posts one, and hands back the entry it
-    /// created. The page's insert trigger is a single call to PrepareInboundEntry, so going through
-    /// the codeunit exercises the same numbering and direction logic; the OData plumbing around it
-    /// cannot be reached from a test session.
+    /// Settles a deduction the way the API page does when Alvys posts one, and hands back the entry
+    /// it created. The page's insert trigger is a single call to PrepareApplyDeductionEntry, so
+    /// going through the codeunit exercises the same matching, numbering and direction logic; the
+    /// OData plumbing around it cannot be reached from a test session.
+    ///
+    /// The remaining five parameters are the driver pay payload as described in the technical
+    /// scope. The field names are still Alvys' to confirm, so this is the shape the page has to
+    /// survive, not a contract.
     /// </summary>
-    local procedure InsertInboundEntry(DocumentNo: Code[20]; RequestBody: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    local procedure InsertInboundEntry(DeductionId: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    var
+        Retryable: Boolean;
+    begin
+        InsertInboundEntry(DeductionId, AlvysEntry, Retryable);
+    end;
+
+    local procedure InsertInboundEntry(DeductionId: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry"; var Retryable: Boolean)
     begin
         AlvysEntry.Init();
-        AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
-        AlvysEntry."Document No." := DocumentNo;
-        AlvysEntry.URL := '/api/tanager/alvys/v1.0/alvysApplyDeductions';
-        AlvysEntry.Method := 'POST';
-        AlvysSalesMgt.PrepareInboundEntry(AlvysEntry, RequestBody);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, 'TR2516627931370728085', '1', -55.0, WorkDate(), 'Settlement 12345', Retryable);
         AlvysEntry.Insert(true);
     end;
 
     /// <summary>
-    /// The driver pay payload as it is described in the technical scope. The field names are still
-    /// Alvys' to confirm, so this is the shape the page has to survive, not a contract.
+    /// Logs a deduction against a posted sales invoice and hands back its Alvys Id, so the inbound
+    /// call has something to match on. Pass a blank document number for a deduction whose
+    /// originating document has not been posted yet. Nothing is sent to Alvys: these tests are
+    /// about how Business Central resolves an Id it has already recorded.
     /// </summary>
-    local procedure DriverPayPayload(): Text
+    local procedure LoggedDeductionId(PostedDocumentNo: Code[20]): Text
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        LastDeduction: Record "BAASI Alvys Deduction";
+        DeductionId: Text;
     begin
-        exit('{"DeductionId":"4ba92c0d-736d-4b44-85d0-12c9fc9bad71","TruckId":"TR2516627931370728085",' +
-            '"TruckNumber":"1","Amount":55.0,"SettlementDate":"2026-07-22","Description":"Settlement 12345"}');
+        DeductionId := DelChr(Format(CreateGuid()), '=', '{}');
+        AlvysDeduction.Init();
+        if LastDeduction.FindLast() then
+            AlvysDeduction."Entry No." := LastDeduction."Entry No." + 1
+        else
+            AlvysDeduction."Entry No." := 1;
+        AlvysDeduction.Id := CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id));
+        AlvysDeduction."Truck Id" := 'TR2516627931370728085';
+        AlvysDeduction."Truck Number" := '1';
+        AlvysDeduction.Amount := -55.0;
+        AlvysDeduction.Date := WorkDate();
+        AlvysDeduction."Document Type" := AlvysDeduction."Document Type"::"Sales Invoice";
+        AlvysDeduction."Posted Document No." := PostedDocumentNo;
+        AlvysDeduction.Insert(true);
+        exit(DeductionId);
+    end;
+
+    /// <summary>
+    /// A posted sales invoice in the company to hang a deduction off. Any one will do: these tests
+    /// check that the entry is pointed at the invoice the deduction names, not which invoice it is.
+    /// </summary>
+    local procedure PostedSalesInvoiceNo(): Code[20]
+    var
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        Assert.IsTrue(SalesInvHeader.FindLast(), 'The company needs at least one posted sales invoice for the inbound tests to match against.');
+        exit(SalesInvHeader."No.");
     end;
 
     /// <summary>

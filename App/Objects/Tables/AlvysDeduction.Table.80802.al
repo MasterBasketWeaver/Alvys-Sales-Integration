@@ -102,5 +102,8 @@ table 80802 "BAASI Alvys Deduction"
         key(K2; "Posted Document No.") { }
         key(K3; "Alvys Created At") { }
         key(K4; "SystemCreatedAt") { }
+        // The inbound apply-deduction call arrives with the Alvys deduction Id and nothing else to
+        // match on, so that lookup runs on every settlement Alvys processes.
+        key(K5; Id) { }
     }
 }

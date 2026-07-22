@@ -6,9 +6,14 @@ page 80803 "BAASI Alvys Apply Ded. API"
     //   POST .../api/tanager/alvys/v1.0/companies({companyId})/alvysApplyDeductions
     //
     // Custom API pages are exposed automatically, so this needs no web service registration.
-    // The call is logged to the same entry table the outbound calls use, as Direction Inbound.
-    // Matching the payload to the sales invoice and generating the payment journal is a separate
-    // step, still blocked on the offset G/L account.
+    //
+    // The page takes the six driver pay fields and nothing else. They are page variables rather
+    // than table fields: the entry table logs the call, it does not store the payload field by
+    // field. Everything the entry needs beyond them — the document, the request body, the method
+    // and URL — is derived in PrepareApplyDeductionEntry.
+    //
+    // Generating the payment journal from the matched invoice is a separate step, still blocked on
+    // the offset G/L account.
 
     PageType = API;
     APIPublisher = 'tanager';
@@ -40,49 +45,81 @@ page 80803 "BAASI Alvys Apply Ded. API"
                 {
                     Editable = false;
                 }
+                // The payload Alvys posts. Each one is bound to a page variable, so setting it
+                // leaves the record untouched as far as the framework is concerned and the delayed
+                // insert never fires. Stamping the direction marks the record dirty, so a call that
+                // sends any single field is still persisted rather than answered 201 and dropped.
+                field(deductionId; DeductionIdTxt)
+                {
+                    Caption = 'Deduction Id';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                field(truckId; TruckIdTxt)
+                {
+                    Caption = 'Truck Id';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                field(truckNumber; TruckNumberTxt)
+                {
+                    Caption = 'Truck Number';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                field(amount; AmountDec)
+                {
+                    Caption = 'Amount';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                field(settlementDate; SettlementDateVar)
+                {
+                    Caption = 'Settlement Date';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                field(description; DescriptionTxt)
+                {
+                    Caption = 'Description';
+
+                    trigger OnValidate()
+                    begin
+                        MarkDirty();
+                    end;
+                }
+                // Read back only. These say what Business Central made of the payload: which posted
+                // invoice the deduction was matched to, and why it could not be matched.
                 field(direction; Rec.Direction)
                 {
                     Editable = false;
                 }
-                // The entry fields are read-only on the table, since the outbound log is written by
-                // code only. The inbound call has to be able to set them, hence the override.
                 field(documentType; Rec."Document Type")
                 {
-                    Editable = true;
+                    Editable = false;
                 }
                 field(documentNo; Rec."Document No.")
                 {
-                    Editable = true;
-                }
-                field(url; Rec.URL)
-                {
-                    Editable = true;
-                }
-                field(method; Rec.Method)
-                {
-                    Editable = true;
-                }
-                field(requestBody; RequestBodyTxt)
-                {
-                    Caption = 'Request Body';
-
-                    trigger OnValidate()
-                    begin
-                        // This field is bound to a page variable, not a table field, so setting it
-                        // leaves the record untouched as far as the framework is concerned. A call
-                        // that sends nothing but the payload would then be answered 201 without
-                        // anything being written. Stamping the direction here marks the record
-                        // dirty, so the delayed insert fires.
-                        Rec.Direction := Rec.Direction::Inbound;
-                    end;
-                }
-                field(response; Rec.Response)
-                {
-                    Editable = true;
+                    Editable = false;
                 }
                 field(errorMessage; Rec."Error Message")
                 {
-                    Editable = true;
+                    Editable = false;
                 }
                 field(systemCreatedAt; Rec.SystemCreatedAt)
                 {
@@ -93,17 +130,71 @@ page 80803 "BAASI Alvys Apply Ded. API"
     }
 
     var
-        RequestBodyTxt: Text;
+        DeductionIdTxt: Text;
+        TruckIdTxt: Text;
+        TruckNumberTxt: Text;
+        DescriptionTxt: Text;
+        AmountDec: Decimal;
+        SettlementDateVar: Date;
+
+    /// <summary>
+    /// Marks the record dirty so DelayedInsert fires. See the comment on the payload fields.
+    /// </summary>
+    local procedure MarkDirty()
+    begin
+        Rec.Direction := Rec.Direction::Inbound;
+    end;
 
     trigger OnAfterGetRecord()
+    var
+        JsonMgt: Codeunit "BAAPI Json Mgt.";
+        RequestBody: JsonObject;
     begin
-        RequestBodyTxt := Rec.GetRequestBody();
+        // The payload is stored on the entry as the body it arrived as, so reading a row back has
+        // to take it apart again.
+        Clear(DeductionIdTxt);
+        Clear(TruckIdTxt);
+        Clear(TruckNumberTxt);
+        Clear(DescriptionTxt);
+        Clear(AmountDec);
+        Clear(SettlementDateVar);
+        if not RequestBody.ReadFrom(Rec.GetRequestBody()) then
+            exit;
+        DeductionIdTxt := JsonMgt.GetJsonValueAsText(RequestBody, 'DeductionId');
+        TruckIdTxt := JsonMgt.GetJsonValueAsText(RequestBody, 'TruckId');
+        TruckNumberTxt := JsonMgt.GetJsonValueAsText(RequestBody, 'TruckNumber');
+        DescriptionTxt := JsonMgt.GetJsonValueAsText(RequestBody, 'Description');
+        AmountDec := JsonMgt.GetJsonValueAsDecimal(RequestBody, 'Amount');
+        // The shared Json codeunit has no date getter, and the body carries the date the way the
+        // JSON writer emitted it, so read it back in the same XML format.
+        if not Evaluate(SettlementDateVar, JsonMgt.GetJsonValueAsText(RequestBody, 'SettlementDate'), 9) then
+            Clear(SettlementDateVar);
     end;
 
     trigger OnInsertRecord(BelowxRec: Boolean): Boolean
     var
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+        Retryable: Boolean;
     begin
-        AlvysSalesMgt.PrepareInboundEntry(Rec, RequestBodyTxt);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(Rec, DeductionIdTxt, TruckIdTxt, TruckNumberTxt, AmountDec, SettlementDateVar, DescriptionTxt, Retryable);
+
+        // The entry is written whichever way the call is answered: the log is the record of what
+        // Alvys sent, and a call that failed is the one most worth having. Inserting here rather
+        // than leaving it to the framework keeps every path identical up to this point.
+        Rec.Insert(true);
+
+        // A failure Alvys could clear by sending the same payload again is refused, so it does
+        // retry — the deduction's document has not been posted yet, and the invoice the settlement
+        // needs will exist shortly. Anything else is answered 201 with the reason on the entry: a
+        // deduction Business Central has no record of will never match, so refusing it would buy
+        // nothing but a retry for as long as Alvys keeps trying, and a duplicate log row for each.
+        if not Retryable then
+            exit(false);
+
+        // The error rolls the transaction back and would take the entry above with it, so it is
+        // committed first — on this path only. Every other path commits with the framework's own
+        // transaction, once this trigger returns.
+        Commit();
+        Error(Rec."Error Message");
     end;
 }

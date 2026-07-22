@@ -3,7 +3,8 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     Permissions = tabledata "BAASI Alvys Sales Setup" = RIMD,
         tabledata "BAASI Alvys Sales Entry" = RIMD,
         tabledata "BAASI Alvys Deduction" = RIMD,
-        tabledata "Dimension Set Entry" = R;
+        tabledata "Dimension Set Entry" = R,
+        tabledata "Sales Invoice Header" = R;
 
 
     local procedure GetAndCheckSetup()
@@ -426,6 +427,96 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysEntry.SetRequestBody(RequestBody);
     end;
 
+    /// <summary>
+    /// Fills in an apply-deduction entry from the payload fields the API page carries. The page
+    /// takes the six driver pay fields only, so everything else on the entry is derived here: the
+    /// document the deduction was raised against, the request body rebuilt from the fields, and the
+    /// method and URL of the endpoint the call arrived on.
+    ///
+    /// A payload that cannot be matched to a posted invoice is still logged, with the reason in the
+    /// error message. The entry table is the audit log of what Alvys sent, so losing the record of
+    /// a call that failed would be the wrong way round.
+    ///
+    /// Retryable says whether sending the same payload again could succeed. It is what the API page
+    /// decides between refusing the call and accepting it, so the classification lives here with
+    /// the reasons rather than on the page.
+    /// </summary>
+    internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; var Retryable: Boolean)
+    var
+        ErrorText: Text;
+    begin
+        Retryable := false;
+        // The AL runtime gives an API page no access to the HTTP request it is serving, so the
+        // method and URL are the endpoint's own, not read off the call.
+        AlvysEntry.Method := ApplyDeductionMethodTok;
+        AlvysEntry.URL := ApplyDeductionURLTok;
+        AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
+        AlvysEntry."Document No." := ApplyDeductionDocumentNo(DeductionId, ErrorText, Retryable);
+        if ErrorText <> '' then
+            AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
+        PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
+    end;
+
+    /// <summary>
+    /// Resolves the deduction Alvys settled to the posted sales invoice it was raised against.
+    /// Returns a blank document number and the reason in ErrorText when no invoice can be reached.
+    ///
+    /// Retryable is set only where sending the same payload again could succeed: the deduction
+    /// exists but its document has not been posted yet, so the invoice the settlement needs will
+    /// come into being on its own. Every other failure is settled — no number of retries turns a
+    /// deduction Business Central has never recorded into one it has.
+    /// </summary>
+    local procedure ApplyDeductionDocumentNo(DeductionId: Text; var ErrorText: Text; var Retryable: Boolean): Code[20]
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        if DeductionId = '' then begin
+            ErrorText := MissingDeductionIDErr;
+            exit('');
+        end;
+
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        if not AlvysDeduction.FindLast() then begin
+            ErrorText := StrSubstNo(NoDeductionFoundErr, DeductionId);
+            exit('');
+        end;
+
+        // The posted invoice number is stamped on the deduction when the originating document is
+        // posted. While it is blank the deduction still sits on an unposted document, and there is
+        // no posted invoice for the settlement to apply against — yet.
+        if AlvysDeduction."Posted Document No." = '' then begin
+            ErrorText := StrSubstNo(DeductionNotPostedErr, DeductionId);
+            Retryable := true;
+            exit('');
+        end;
+
+        if not SalesInvHeader.Get(AlvysDeduction."Posted Document No.") then begin
+            ErrorText := StrSubstNo(NoSalesInvoiceFoundErr, AlvysDeduction."Posted Document No.", DeductionId);
+            exit('');
+        end;
+        exit(SalesInvHeader."No.");
+    end;
+
+    /// <summary>
+    /// Rebuilds the payload Alvys sent from the fields the page received, so the entry logs the
+    /// call in the same shape as the outbound requests. The keys are Alvys' own field names.
+    /// </summary>
+    local procedure ApplyDeductionRequestBody(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text): Text
+    var
+        JsonBody: JsonObject;
+        RequestBody: Text;
+    begin
+        JsonBody.Add('DeductionId', DeductionId);
+        JsonBody.Add('TruckId', TruckId);
+        JsonBody.Add('TruckNumber', TruckNumber);
+        JsonBody.Add('Amount', Amount);
+        JsonBody.Add('SettlementDate', SettlementDate);
+        JsonBody.Add('Description', Description);
+        JsonBody.WriteTo(RequestBody);
+        exit(RequestBody);
+    end;
+
     local procedure InsertEntry(DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
@@ -472,6 +563,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         DriverIdTok: Label 'DriverId', Locked = true;
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
+        NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
+        DeductionNotPostedErr: Label 'The document the deduction with Id %1 was created for has not been posted yet.', Comment = '%1 = Deduction Id';
+        NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on the deduction with Id %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';
+        ApplyDeductionMethodTok: Label 'POST', Locked = true;
+        ApplyDeductionURLTok: Label '/api/tanager/alvys/v1.0/alvysApplyDeductions', Locked = true;
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
         UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
 }

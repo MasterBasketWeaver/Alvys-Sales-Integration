@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
 """Contract test for the inbound Alvys API page (page 80803, alvysApplyDeductions).
 
-The AL suite in the test app covers the logic behind the page: entry numbering, the Inbound
-direction stamp, the request body Blob. It cannot cover the OData layer in front of it, because
-the suite runs in a web-service session and TestPage needs a NAV client session.
+The page takes the six driver pay parameters and derives the rest of the entry from them. The AL
+suite in the test app covers that derivation: entry numbering, the Inbound direction stamp, and
+matching the deduction Id to the posted invoice. It cannot cover the OData layer in front of it,
+because the suite runs in a web-service session and TestPage needs a NAV client session.
 
 So this hits the real endpoint over HTTP and asserts the things Alvys actually depends on:
 
   1. The property names and EDM types published in $metadata. These are the wire contract now,
      and renaming a page control silently rewrites them.
-  2. That every property Alvys has to write is writable. The entry fields are Editable = false on
-     the table, so each writable property rests on an explicit override on the page.
-  3. That the request body survives the round trip. It is bound to a page variable rather than a
-     table field, so it depends on the framework populating that variable before OnInsertRecord.
-  4. That the entity set exposes inbound entries only, never the outbound log.
-  5. That modify and delete stay closed.
+  2. That a payload matching a posted invoice is accepted, and comes back pointed at that invoice.
+  3. That a failure Alvys could clear by retrying -- a deduction whose document is not posted yet
+     -- is refused with a 400, and that the entry is logged anyway. The refusal rolls the
+     transaction back, so the entry only survives because the page commits it first. That commit
+     is the whole reason this check exists.
+  4. That a failure retrying cannot clear -- an unknown or blank deduction Id -- is answered 201
+     with the reason on the entry instead. Refusing it would buy nothing but a retry for as long
+     as Alvys keeps trying, and a duplicate log row for each attempt.
+  5. That each of the six parameters marks the record dirty on its own. They are bound to page
+     variables rather than table fields, so each rests on its own OnValidate; without it the
+     delayed insert never fires and the call is answered 201 with nothing written.
+  6. That the derived fields are refused as inputs, and that the parameters survive the round trip
+     -- they are not stored field by field, but rebuilt from the logged request body.
+  7. That the entity set exposes inbound entries only, and that modify and delete stay closed.
 
-Nothing rolls these rows back the way the AL suite rolls back its own, so the run finishes by
-deleting every entry it created through the cleanup endpoint in the test app. That endpoint is
-deliberately not part of the app that ships: the entry table is an append-only audit log.
+Both failure paths need a deduction in a particular state, which nothing here can create through
+the shipping app, so the test app carries a seed endpoint. Nothing rolls these rows back either,
+so the run finishes by deleting every entry and deduction it created. The seed and cleanup
+endpoints live in the test app on purpose: the entry table is an append-only audit log.
 
 Run it after publishing both apps:  python3 TestSuite/bc-api-contract-test.py
 Exits non-zero on the first failed assertion.
@@ -26,6 +36,7 @@ Exits non-zero on the first failed assertion.
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 
 import requests
@@ -46,39 +57,52 @@ API = f"{BASE}/api/tanager/alvys/v1.0"
 EXPECTED_PROPERTIES = {
     "id": "Edm.Guid",
     "entryNo": "Edm.Int32",
+    # The driver pay payload Alvys posts.
+    "deductionId": "Edm.String",
+    "truckId": "Edm.String",
+    "truckNumber": "Edm.String",
+    "amount": "Edm.Decimal",
+    "settlementDate": "Edm.Date",
+    "description": "Edm.String",
+    # What Business Central made of it, read back.
     "direction": "Microsoft.NAV.baasiAlvysEntryDirection",
     "documentType": "Microsoft.NAV.baasiAlvysEntryDocType",
     "documentNo": "Edm.String",
-    "url": "Edm.String",
-    "method": "Edm.String",
-    "requestBody": "Edm.String",
-    "response": "Edm.String",
     "errorMessage": "Edm.String",
     "systemCreatedAt": "Edm.DateTimeOffset",
 }
 
-# Properties Alvys has to be able to write. Each one needs Editable = true on the page, because
-# the entry table marks them read-only for the outbound log.
-WRITABLE_PROPERTIES = ["documentType", "documentNo", "url", "method", "requestBody",
-                       "response", "errorMessage"]
+# The six parameters the page takes.
+PARAMETERS = ["deductionId", "truckId", "truckNumber", "amount", "settlementDate", "description"]
+
+# Everything else on the entry is derived, so a caller must not be able to set it. entryNo is not
+# in the list: it is the primary key, and OData accepts a key on insert. It is checked separately,
+# on the stronger guarantee that the numbering overrides whatever was sent.
+READ_ONLY_PROPERTIES = ["direction", "documentType", "documentNo", "errorMessage"]
+
+# OData encodes the spaces in an enum value, so this is the string Alvys sees on the wire.
+POSTED_SALES_INVOICE = "Posted_x0020_Sales_x0020_Invoice"
 
 # The driver pay payload as described in section 4.2 of the technical scope. The field names are
-# still Alvys' to confirm, so this is the shape the page has to carry, not a contract.
-DRIVER_PAY_PAYLOAD = json.dumps({
-    "DeductionId": "4ba92c0d-736d-4b44-85d0-12c9fc9bad71",
-    "TruckId": "TR2516627931370728085",
-    "TruckNumber": "1",
-    "Amount": 55.0,
-    "SettlementDate": "2026-07-22",
-    "Description": "Settlement 12345",
-})
+# still Alvys' to confirm, so this is the shape the page has to carry, not a contract. deductionId
+# is filled in per call: a matched one is seeded, an unmatched one is invented.
+DRIVER_PAY_PAYLOAD = {
+    "deductionId": "",
+    "truckId": "TR2516627931370728085",
+    "truckNumber": "1",
+    "amount": -55.0,
+    "settlementDate": "2026-07-22",
+    "description": "Settlement 12345",
+}
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 
 failures = []
 checks = 0
-# Every entry this run creates, so the cleanup at the end deletes only its own rows.
-created_ids = []
+# Deductions this run seeded, so the cleanup at the end deletes only its own rows. Entries are not
+# tracked individually: the refusal path commits them, so the sweep goes by entry number instead.
+seeded_ids = []
+baseline_entry_no = 0
 
 
 def check(condition, message):
@@ -91,7 +115,15 @@ def check(condition, message):
         failures.append(message)
 
 
+def settle(entity_set, headers, **overrides):
+    """POSTs a driver pay payload, with any field overridden or added."""
+    payload = dict(DRIVER_PAY_PAYLOAD, **overrides)
+    return requests.post(entity_set, headers=headers, data=json.dumps(payload), timeout=120)
+
+
 def main():
+    global baseline_entry_no
+
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -103,10 +135,17 @@ def main():
         sys.exit(f"ERROR: company '{COMPANY}' not found.")
     company_id = companies[0]["id"]
     entity_set = f"{API}/companies({company_id})/alvysApplyDeductions"
-    # The cleanup endpoint lives in the test app, under its own publisher.
-    cleanup_set = f"{BASE}/api/bryana/alvys/v1.0/companies({company_id})/alvysEntryCleanups"
+    # The seed and cleanup endpoints live in the test app, under its own publisher.
+    test_api = f"{BASE}/api/bryana/alvys/v1.0/companies({company_id})"
+    cleanup_set = f"{test_api}/alvysEntryCleanups"
+    seed_set = f"{test_api}/alvysDeductionSeeds"
 
-    print("\n[1/6] Published entity shape")
+    # Everything above this number is this run's, and gets deleted at the end.
+    resp = requests.get(cleanup_set, headers=headers, timeout=120)
+    resp.raise_for_status()
+    baseline_entry_no = max((r.get("entryNo", 0) for r in resp.json().get("value", [])), default=0)
+
+    print("\n[1/8] Published entity shape")
     resp = requests.get(f"{API}/$metadata", headers=headers, timeout=120)
     resp.raise_for_status()
     entity = re.search(r'<EntityType Name="alvysApplyDeduction".*?</EntityType>', resp.text, re.S)
@@ -124,65 +163,128 @@ def main():
     key = re.search(r'<PropertyRef Name="(\w+)"', entity.group(0))
     check(key and key.group(1) == "id", "the entity is keyed on 'id'")
 
-    print("\n[2/6] Inbound POST")
-    payload = {
-        "documentType": "Posted Sales Invoice",
-        "documentNo": "PS-INV101026",
-        "url": "/api/tanager/alvys/v1.0/alvysApplyDeductions",
-        "method": "POST",
-        "requestBody": DRIVER_PAY_PAYLOAD,
-        "response": "",
-        "errorMessage": "",
-    }
-    resp = requests.post(entity_set, headers=headers, data=json.dumps(payload), timeout=120)
+    print("\n[2/8] A matched deduction is accepted")
+    matched_id = str(uuid.uuid4())
+    resp = requests.post(seed_set, headers=headers,
+                         data=json.dumps({"deductionId": matched_id}), timeout=120)
+    if resp.status_code != 201:
+        sys.exit(f"ERROR: could not seed a deduction ({resp.status_code}: {resp.text[:300]})")
+    seeded = resp.json()
+    seeded_ids.append(seeded["id"])
+    posted_invoice_no = seeded["postedDocumentNo"]
+    print(f"  (seeded deduction {matched_id} against posted invoice {posted_invoice_no})")
+
+    resp = settle(entity_set, headers, deductionId=matched_id)
     check(resp.status_code == 201, f"POST returns 201 (got {resp.status_code}: {resp.text[:200]})")
     if resp.status_code != 201:
-        cleanup(headers, cleanup_set)
+        cleanup(headers, cleanup_set, seed_set)
         report()
     created = resp.json()
-    created_ids.append(created["id"])
     check(created.get("direction") == "Inbound", "the entry is stamped Inbound")
     check(created.get("entryNo", 0) > 0, "an entry number is assigned")
-    check(created.get("requestBody") == DRIVER_PAY_PAYLOAD,
-          "the request body comes back byte-for-byte")
+    check(created.get("documentType") == POSTED_SALES_INVOICE,
+          f"the entry is stamped Posted Sales Invoice (got {created.get('documentType')})")
+    check(created.get("documentNo") == posted_invoice_no,
+          f"the entry points at the deduction's posted invoice "
+          f"(got {created.get('documentNo')!r}, want {posted_invoice_no!r})")
+    check(not created.get("errorMessage"),
+          f"a matched deduction logs no error (got {created.get('errorMessage')!r})")
 
-    print("\n[3/6] Writable properties")
-    # A property that lost its Editable override fails the whole POST, so send each one on its own
-    # to name the property that broke rather than just reporting a 400.
-    for prop in WRITABLE_PROPERTIES:
-        value = DRIVER_PAY_PAYLOAD if prop == "requestBody" else (
-            "Posted Sales Invoice" if prop == "documentType" else "x")
+    print("\n[3/8] A failure Alvys can clear by retrying is refused")
+    # A deduction whose document is not posted yet will match once it is, so the same payload sent
+    # again can succeed. That is the one failure worth a 400.
+    #
+    # The refusal raises an error, which rolls the transaction back. The entry survives only
+    # because the page commits it before erroring; without that commit this check fails and every
+    # settlement Alvys could not apply would vanish from the log.
+    retryable_id = str(uuid.uuid4())
+    resp = requests.post(seed_set, headers=headers,
+                         data=json.dumps({"deductionId": retryable_id, "unposted": True}),
+                         timeout=120)
+    if resp.status_code != 201:
+        sys.exit(f"ERROR: could not seed an unposted deduction "
+                 f"({resp.status_code}: {resp.text[:300]})")
+    seeded_ids.append(resp.json()["id"])
+
+    resp = settle(entity_set, headers, deductionId=retryable_id)
+    check(resp.status_code == 400,
+          f"an unposted deduction is refused so Alvys retries (got {resp.status_code})")
+    check(retryable_id in resp.text,
+          f"the 400 names the deduction it could not apply (got {resp.text[:200]})")
+
+    logged = find_entry(entity_set, headers, retryable_id)
+    check(logged is not None, "the refused call is logged despite the error rolling back")
+    if logged:
+        check(logged.get("documentNo") == "",
+              f"the refused entry has no document number (got {logged.get('documentNo')!r})")
+        check("has not been posted" in (logged.get("errorMessage") or ""),
+              f"the refused entry says why (got {logged.get('errorMessage')!r})")
+
+    print("\n[4/8] A failure retrying cannot clear is accepted and logged")
+    # A deduction Business Central has no record of will never match, so refusing it would buy
+    # nothing but a retry for as long as Alvys keeps trying, and a duplicate log row for each.
+    unmatched_id = str(uuid.uuid4())
+    resp = settle(entity_set, headers, deductionId=unmatched_id)
+    check(resp.status_code == 201,
+          f"an unknown deduction is accepted, not refused (got {resp.status_code}: "
+          f"{resp.text[:160]})")
+    if resp.status_code == 201:
+        unmatched = resp.json()
+        check(unmatched.get("documentNo") == "",
+              f"an unknown deduction gets no document number (got {unmatched.get('documentNo')!r})")
+        check(unmatched_id in (unmatched.get("errorMessage") or ""),
+              f"the response carries the reason it could not be applied "
+              f"(got {unmatched.get('errorMessage')!r})")
+
+    # A blank deduction Id has nothing to match on and never will, so it is treated the same way.
+    resp = settle(entity_set, headers, deductionId="")
+    check(resp.status_code == 201, f"a blank deduction Id is accepted (got {resp.status_code})")
+    if resp.status_code == 201:
+        check("cannot be blank" in (resp.json().get("errorMessage") or ""),
+              f"a blank deduction Id logs its reason (got {resp.json().get('errorMessage')!r})")
+
+    print("\n[5/8] Each parameter marks the record dirty")
+    # A parameter that lost its OnValidate leaves the record clean, so the delayed insert never
+    # fires, OnInsertRecord never runs, and the call is answered 201 with nothing written. Since an
+    # unmatchable payload is now answered 201 too, the status alone cannot tell those apart: what
+    # separates them is whether a row was actually persisted.
+    for prop in PARAMETERS:
         resp = requests.post(entity_set, headers=headers,
-                             data=json.dumps({prop: value}), timeout=120)
-        check(resp.status_code == 201,
-              f"'{prop}' is writable (got {resp.status_code}: {resp.text[:120]})")
-        if resp.status_code == 201 and resp.json().get("id", ZERO_GUID) != ZERO_GUID:
-            created_ids.append(resp.json()["id"])
+                             data=json.dumps({prop: DRIVER_PAY_PAYLOAD[prop] or unmatched_id}),
+                             timeout=120)
+        single = resp.json() if resp.status_code == 201 else {}
+        check(single.get("id", ZERO_GUID) != ZERO_GUID and single.get("entryNo", 0) > 0,
+              f"'{prop}' alone is persisted, not just acknowledged "
+              f"(got {resp.status_code}, id {single.get('id')})")
 
-    # requestBody is bound to a page variable rather than a table field, so a call that sends
-    # nothing else leaves the record untouched and the delayed insert never fires. That answered
-    # 201 while persisting nothing, which would lose payloads silently. Guard the fix.
-    resp = requests.post(entity_set, headers=headers,
-                         data=json.dumps({"requestBody": DRIVER_PAY_PAYLOAD}), timeout=120)
-    body_only = resp.json() if resp.status_code == 201 else {}
-    persisted = body_only.get("id", ZERO_GUID) != ZERO_GUID
-    check(resp.status_code == 201 and persisted,
-          f"a payload-only POST is persisted, not just acknowledged (id {body_only.get('id')})")
-    if persisted:
-        created_ids.append(body_only["id"])
-        check(body_only.get("entryNo", 0) > 0, "a payload-only POST is given an entry number")
-        check(body_only.get("direction") == "Inbound", "a payload-only POST is stamped Inbound")
+    print("\n[6/8] Derived fields are not inputs")
+    # Sent alongside a payload that would otherwise be accepted, so a 400 means the property was
+    # refused rather than the settlement failing to match.
+    for prop in READ_ONLY_PROPERTIES:
+        resp = settle(entity_set, headers, deductionId=matched_id, **{prop: "x"})
+        check(resp.status_code >= 400, f"'{prop}' is refused as an input (got {resp.status_code})")
 
-    print("\n[4/6] Round trip by key")
+    # entryNo is the primary key, so OData accepts it on insert rather than refusing it. The log
+    # numbers its own entries, so what matters is that a caller cannot choose the number: sending
+    # one must not collide with, or renumber, the entries already in the log.
+    resp = settle(entity_set, headers, deductionId=matched_id, entryNo=1)
+    numbered = resp.json() if resp.status_code == 201 else {}
+    check(numbered.get("entryNo", 0) > 1,
+          f"a caller-supplied entry number is overridden (got {numbered.get('entryNo')})")
+
+    print("\n[7/8] Round trip by key")
     resp = requests.get(f"{entity_set}({created['id']})", headers=headers, timeout=120)
     check(resp.status_code == 200, f"GET by id returns 200 (got {resp.status_code})")
     if resp.status_code == 200:
         fetched = resp.json()
-        check(fetched.get("requestBody") == DRIVER_PAY_PAYLOAD,
-              "the request body survives the Blob round trip")
+        # The parameters are not stored field by field; they are rebuilt from the request body the
+        # entry logged. Reading a row back has to take that body apart again and return every one.
+        for prop, value in dict(DRIVER_PAY_PAYLOAD, deductionId=matched_id).items():
+            check(fetched.get(prop) == value,
+                  f"'{prop}' survives the round trip (got {fetched.get(prop)!r}, want {value!r})")
         check(fetched.get("entryNo") == created.get("entryNo"), "the entry number is stable")
 
-    print("\n[5/6] Exposure limits")
+    print("\n[8/8] Exposure limits")
     resp = requests.get(entity_set, headers=headers, timeout=120)
     check(resp.status_code == 200, f"the entity set is readable (got {resp.status_code})")
     if resp.status_code == 200:
@@ -193,29 +295,54 @@ def main():
     etag = created.get("@odata.etag", "*")
     modify_headers = dict(headers, **{"If-Match": etag})
     resp = requests.patch(f"{entity_set}({created['id']})", headers=modify_headers,
-                          data=json.dumps({"method": "PUT"}), timeout=120)
+                          data=json.dumps({"description": "changed"}), timeout=120)
     check(resp.status_code >= 400, f"modify is refused (got {resp.status_code})")
     resp = requests.delete(f"{entity_set}({created['id']})", headers=modify_headers, timeout=120)
     check(resp.status_code >= 400, f"delete is refused (got {resp.status_code})")
 
-    print("\n[6/6] Cleanup")
-    cleanup(headers, cleanup_set)
+    print("\nCleanup")
+    cleanup(headers, cleanup_set, seed_set)
     report()
 
 
-def cleanup(headers, cleanup_set):
-    """Deletes the entries this run created, through the test app's cleanup endpoint."""
-    if not created_ids:
-        return
+def find_entry(entity_set, headers, deduction_id):
+    """The entry logged for a deduction Id, or None. Read back through the shipping endpoint."""
+    resp = requests.get(entity_set, headers=headers, timeout=120)
+    if resp.status_code != 200:
+        return None
+    for row in resp.json().get("value", []):
+        if row.get("deductionId") == deduction_id:
+            return row
+    return None
+
+
+def cleanup(headers, cleanup_set, seed_set):
+    """Deletes the entries and deductions this run created, through the test app's endpoints."""
+    resp = requests.get(cleanup_set, headers=headers, timeout=120)
+    entries = [r for r in resp.json().get("value", [])
+               if r.get("entryNo", 0) > baseline_entry_no] if resp.status_code == 200 else []
+
     removed = 0
-    for entry_id in created_ids:
-        resp = requests.delete(f"{cleanup_set}({entry_id})", headers=headers, timeout=120)
+    for row in entries:
+        resp = requests.delete(f"{cleanup_set}({row['id']})", headers=headers, timeout=120)
         if resp.status_code in (200, 204):
             removed += 1
         else:
-            print(f"  [WARN] entry {entry_id} not deleted ({resp.status_code}: {resp.text[:120]})")
-    check(removed == len(created_ids),
-          f"every entry this run created was deleted ({removed}/{len(created_ids)})")
+            print(f"  [WARN] entry {row['entryNo']} not deleted "
+                  f"({resp.status_code}: {resp.text[:120]})")
+    check(removed == len(entries),
+          f"every entry this run created was deleted ({removed}/{len(entries)})")
+
+    removed = 0
+    for seed_id in seeded_ids:
+        resp = requests.delete(f"{seed_set}({seed_id})", headers=headers, timeout=120)
+        if resp.status_code in (200, 204):
+            removed += 1
+        else:
+            print(f"  [WARN] deduction {seed_id} not deleted "
+                  f"({resp.status_code}: {resp.text[:120]})")
+    check(removed == len(seeded_ids),
+          f"every deduction this run seeded was deleted ({removed}/{len(seeded_ids)})")
 
 
 def report():
