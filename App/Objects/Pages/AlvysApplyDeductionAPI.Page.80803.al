@@ -12,6 +12,11 @@ page 80803 "BAASI Alvys Apply Ded. API"
     // field. Everything the entry needs beyond them — the document, the request body, the method
     // and URL — is derived in PrepareApplyDeductionEntry.
     //
+    // A payload that names no truck, applies nothing, or carries no settlement date is refused the
+    // same way one that cannot be matched to an invoice is: the entry is logged, and the call is
+    // answered 400 with the reason. The checks live with the matching in PrepareApplyDeductionEntry,
+    // so the log is written on every path.
+    //
     // Generating the payment journal from the matched invoice is a separate step, still blocked on
     // the offset G/L account.
 

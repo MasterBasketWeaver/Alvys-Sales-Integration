@@ -449,6 +449,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysEntry.URL := ApplyDeductionURLTok;
         AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
         AlvysEntry."Document No." := ApplyDeductionDocumentNo(DeductionId, ErrorText);
+        // The deduction Id is what the settlement is matched on, so it is resolved first and its
+        // reason is the one reported. The rest of the payload is only worth checking once there is
+        // an invoice to apply against.
+        if ErrorText = '' then
+            ErrorText := ApplyDeductionPayloadError(TruckId, TruckNumber, Amount, SettlementDate);
         if ErrorText <> '' then
             AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
         PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
@@ -492,8 +497,34 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
+    /// Checks the driver pay payload carries what a settlement has to be applied from, and returns
+    /// the reason it does not. Alvys names the truck by either field, so only a payload naming it
+    /// by neither is refused; which one arrived is not this codeunit's business.
+    /// </summary>
+    local procedure ApplyDeductionPayloadError(TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date): Text
+    begin
+        if (TruckId = '') and (TruckNumber = '') then
+            exit(ApplyMissingTruckErr);
+
+        // A settlement clears a deduction, and deductions are held negative, so the amount that
+        // applies one is negative too. An amount left out of the payload arrives as zero, so the
+        // same test covers both a missing amount and one that would apply nothing.
+        if Amount >= 0 then
+            exit(StrSubstNo(ApplyInvalidAmountErr, Amount));
+
+        if SettlementDate = 0D then
+            exit(ApplyMissingSettlementDateErr);
+
+        exit('');
+    end;
+
+    /// <summary>
     /// Rebuilds the payload Alvys sent from the fields the page received, so the entry logs the
     /// call in the same shape as the outbound requests. The keys are Alvys' own field names.
+    ///
+    /// The optional fields — the two truck fields and the description — are left out when they did
+    /// not arrive rather than written blank, so the logged body says which of the two Alvys
+    /// identified the truck by, and reads as the call it was.
     /// </summary>
     local procedure ApplyDeductionRequestBody(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text): Text
     var
@@ -501,11 +532,14 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         RequestBody: Text;
     begin
         JsonBody.Add('DeductionId', DeductionId);
-        JsonBody.Add('TruckId', TruckId);
-        JsonBody.Add('TruckNumber', TruckNumber);
+        if TruckId <> '' then
+            JsonBody.Add('TruckId', TruckId);
+        if TruckNumber <> '' then
+            JsonBody.Add('TruckNumber', TruckNumber);
         JsonBody.Add('Amount', Amount);
         JsonBody.Add('SettlementDate', SettlementDate);
-        JsonBody.Add('Description', Description);
+        if Description <> '' then
+            JsonBody.Add('Description', Description);
         JsonBody.WriteTo(RequestBody);
         exit(RequestBody);
     end;
@@ -557,6 +591,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
         ApplyBlankDeductionErr: Label 'The payload has no deduction Id, so there is nothing to match it to a posted invoice.';
+        ApplyMissingTruckErr: Label 'The payload names no truck: the truck Id and the truck number are both blank.';
+        ApplyInvalidAmountErr: Label 'The payload has an amount of %1. A settlement has to apply an amount less than zero.', Comment = '%1 = Amount';
+        ApplyMissingSettlementDateErr: Label 'The payload has no settlement date.';
         NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
         DeductionNotPostedErr: Label 'Deduction %1 is on %2 %3, which has not been posted yet.', Comment = '%1 = Deduction Id, %2 = Document Type, %3 = Document No.';
         NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on the deduction with Id %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';

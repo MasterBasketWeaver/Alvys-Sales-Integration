@@ -399,6 +399,116 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Assert.AreEqual('The payload has no deduction Id, so there is nothing to match it to a posted invoice.', AlvysEntry."Error Message", 'The error should say the deduction Id is blank.');
     end;
 
+    [Test]
+    procedure InboundAPIPageRefusesPayloadNamingNoTruck()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] Alvys names the truck by either field, so a payload carrying neither identifies
+        // no truck at all and is refused.
+        Initialize();
+
+        // [WHEN] A payload arrives with a blank truck Id and a blank truck number
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), '', '', -55.0, WorkDate(), AlvysEntry);
+
+        // [THEN] The call is logged with the reason it names no truck
+        Assert.AreEqual('The payload names no truck: the truck Id and the truck number are both blank.', AlvysEntry."Error Message", 'The error should say the payload names no truck.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageAcceptsEitherTruckField()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] Either truck field on its own names the truck, so neither one alone is refused.
+        Initialize();
+
+        // [WHEN] A payload arrives with the truck Id only, and another with the truck number only
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '', -55.0, WorkDate(), AlvysEntry);
+
+        // [THEN] Neither is refused
+        Assert.AreEqual('', AlvysEntry."Error Message", 'A payload naming the truck by Id should not be refused.');
+
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), '', '1', -55.0, WorkDate(), AlvysEntry);
+        Assert.AreEqual('', AlvysEntry."Error Message", 'A payload naming the truck by number should not be refused.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageRefusesAmountThatAppliesNothing()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] A settlement has to apply an amount. An amount left out of the payload arrives
+        // as zero, so a missing amount and one that would apply nothing are refused the same way.
+        Initialize();
+
+        // [WHEN] A payload arrives with no amount, and another with a positive one
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', 0, WorkDate(), AlvysEntry);
+
+        // [THEN] Both are logged with the reason the amount cannot be applied
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('less than zero'), 'A payload with no amount should be refused.');
+
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', 55.0, WorkDate(), AlvysEntry);
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('less than zero'), 'A payload with a positive amount should be refused.');
+    end;
+
+    [Test]
+    procedure InboundAPIPageRefusesPayloadWithNoSettlementDate()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        // [SCENARIO] The settlement date is what the applied entry is dated by, so a payload without
+        // one is refused rather than dated on a guess.
+        Initialize();
+
+        // [WHEN] A payload arrives with no settlement date
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', -55.0, 0D, AlvysEntry);
+
+        // [THEN] The call is logged with the reason
+        Assert.AreEqual('The payload has no settlement date.', AlvysEntry."Error Message", 'The error should say the settlement date is missing.');
+    end;
+
+    [Test]
+    procedure InboundPayloadOmitsTruckFieldThatDidNotArrive()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        RequestBody: JsonObject;
+        JsonToken: JsonToken;
+    begin
+        // [SCENARIO] The logged body is the record of what Alvys sent, so a truck field that did not
+        // arrive is left out of it rather than written back as a blank Alvys never sent.
+        Initialize();
+
+        // [WHEN] A payload arrives naming the truck by number only
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), '', '1', -55.0, WorkDate(), AlvysEntry);
+
+        // [THEN] The logged body carries the truck number and no truck Id key at all
+        Assert.IsTrue(RequestBody.ReadFrom(AlvysEntry.GetRequestBody()), 'The logged request body should be valid JSON.');
+        Assert.IsFalse(RequestBody.Get('TruckId', JsonToken), 'A truck Id that did not arrive should not be written to the logged body.');
+        Assert.IsTrue(RequestBody.Get('TruckNumber', JsonToken), 'The truck number that arrived should be written to the logged body.');
+    end;
+
+    [Test]
+    procedure InboundPayloadOmitsDescriptionThatDidNotArrive()
+    var
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        RequestBody: JsonObject;
+        JsonToken: JsonToken;
+    begin
+        // [SCENARIO] The description is optional, so a payload without one logs a body without the
+        // key rather than a blank description.
+        Initialize();
+
+        // [WHEN] A payload arrives with no description
+        AlvysEntry.Init();
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', -55.0, WorkDate(), '');
+        AlvysEntry.Insert(true);
+
+        // [THEN] The logged body has no description key
+        Assert.IsTrue(RequestBody.ReadFrom(AlvysEntry.GetRequestBody()), 'The logged request body should be valid JSON.');
+        Assert.IsFalse(RequestBody.Get('Description', JsonToken), 'A description that did not arrive should not be written to the logged body.');
+    end;
+
     /// <summary>
     /// The API page refuses every payload that logs a reason, so only a matched settlement is
     /// answered 201. Which HTTP status comes back is a page-level concern and cannot be reached
@@ -558,8 +668,17 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     /// </summary>
     local procedure InsertInboundEntry(DeductionId: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
     begin
+        InsertInboundEntryWith(DeductionId, 'TR2516627931370728085', '1', -55.0, WorkDate(), AlvysEntry);
+    end;
+
+    /// <summary>
+    /// The same call with the payload fields the checks are about left open, for the tests that send
+    /// one of them blank. The description is not among them: it is optional either way.
+    /// </summary>
+    local procedure InsertInboundEntryWith(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    begin
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, 'TR2516627931370728085', '1', -55.0, WorkDate(), 'Settlement 12345');
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, 'Settlement 12345');
         AlvysEntry.Insert(true);
     end;
 
