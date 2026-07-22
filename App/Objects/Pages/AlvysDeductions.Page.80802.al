@@ -28,6 +28,7 @@ page 80802 "BAASI Alvys Deductions"
                 field(Amount; Rec.Amount) { }
                 field("Currency Id"; Rec."Currency Id") { }
                 field("Truck Id"; Rec."Truck Id") { }
+                field("Truck Number"; Rec."Truck Number") { }
                 field("Driver Id"; Rec."Driver Id") { }
                 field(Date; Rec.Date) { }
                 field("Is Paid"; Rec."Is Paid") { }

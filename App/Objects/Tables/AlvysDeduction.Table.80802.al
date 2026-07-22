@@ -62,6 +62,11 @@ table 80802 "BAASI Alvys Deduction"
         {
             Editable = false;
         }
+        field(15; "Truck Number"; Text[50])
+        {
+            Editable = false;
+            Tooltip = 'The truck number the deduction was created for. This is the Tractor Code dimension value on the document, and is what the Alvys truck was resolved from.';
+        }
         field(20; "Document Type"; Enum "Sales Document Type")
         {
             Editable = false;

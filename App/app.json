@@ -26,6 +26,13 @@
       "version": "27.0.1.0"
     }
   ],
+  "internalsVisibleTo": [
+    {
+      "id": "fdd85218-81ca-42d0-89af-afae1465ec50",
+      "name": "Alvys Sales Integration Tests",
+      "publisher": "BryanA BC Developments Inc."
+    }
+  ],
   "idRanges": [
     {
       "from": 80800,
