@@ -65,6 +65,16 @@ page 80803 "BAASI Alvys Apply Ded. API"
                 field(requestBody; RequestBodyTxt)
                 {
                     Caption = 'Request Body';
+
+                    trigger OnValidate()
+                    begin
+                        // This field is bound to a page variable, not a table field, so setting it
+                        // leaves the record untouched as far as the framework is concerned. A call
+                        // that sends nothing but the payload would then be answered 201 without
+                        // anything being written. Stamping the direction here marks the record
+                        // dirty, so the delayed insert fires.
+                        Rec.Direction := Rec.Direction::Inbound;
+                    end;
                 }
                 field(response; Rec.Response)
                 {
