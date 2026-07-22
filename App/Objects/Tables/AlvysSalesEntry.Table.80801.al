@@ -110,14 +110,6 @@ table 80801 "BAASI Alvys Sales Entry"
         exit(s);
     end;
 
-    procedure DisplayRequestBody()
-    var
-        RequestBody: Text;
-    begin
-        RequestBody := Rec.GetRequestBody();
-        if RequestBody <> '' then
-            Message(RequestBody);
-    end;
 
     procedure DisplayErrorMessage()
     var
