@@ -93,6 +93,9 @@ table 80802 "BAASI Alvys Deduction"
         {
             Clustered = true;
         }
-        key(Document; "Document Type", "Document No.", "Posted Document No.") { }
+        key(K1; "Document Type", "Document No.") { }
+        key(K2; "Posted Document No.") { }
+        key(K3; "Alvys Created At") { }
+        key(K4; "SystemCreatedAt") { }
     }
 }

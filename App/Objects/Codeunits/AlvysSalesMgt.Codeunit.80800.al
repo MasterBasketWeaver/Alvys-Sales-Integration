@@ -82,7 +82,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody, ResponseObj : JsonObject;
     begin
         PrepareTruckSearchBody(TruckNumber, JsonBody);
-        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody, DocType, DocNo, PostedDocNo);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'trucks/search', 'application/json', JsonBody, MapDocumentType(DocType), DocNo, PostedDocNo);
         exit(ExtractTruckID(ResponseObj, TruckNumber));
     end;
 
@@ -116,6 +116,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             Error(NoTruckFoundErr, TruckNumber);
         exit(TruckID);
     end;
+
+
+
 
 
 
@@ -167,7 +170,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody, ResponseObj : JsonObject;
     begin
         PrepareDeductionBody(AssetIdFieldName, AssetID, Date, Amount, Category, Description, JsonBody);
-        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, DocType, DocNo, PostedDocNo);
+        ResponseObj := SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/once', 'application/json', JsonBody, MapDocumentType(DocType), DocNo, PostedDocNo);
         if PreviewMode then
             DeleteDeduction(JsonMgt.GetJsonValueAsText(ResponseObj, 'Id'));
         exit(InsertDeduction(ResponseObj, DocType, DocNo, PostedDocNo));
@@ -187,7 +190,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
 
-    local procedure DeleteDeduction(DeductionID: Text): Text
+    procedure DeleteDeduction(DeductionID: Text): Text
     var
         JsonBody, ResponseObj : JsonObject;
         s: Text;
@@ -201,21 +204,43 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
     /// <summary>
+    /// Checks if a deduction exists in Alvys by its Id. Returns true if it does, false if it does not.
+    /// </summary>
+    procedure DoesDeductionExist(DeductionID: Text): Boolean
+    var
+        JsonBody: JsonObject;
+        Result: Boolean;
+    begin
+        SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, false, Result);
+        exit(Result);
+    end;
+
+    /// <summary>
     /// Reads a single deduction back from Alvys by its Id. The response is returned as-is rather
     /// than inserted, so that re-reading a deduction does not duplicate the logged entry.
     /// </summary>
     procedure GetDeduction(DeductionID: Text): JsonObject
     var
         JsonBody: JsonObject;
+        Result: Boolean;
     begin
-        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody));
+        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, false, Result));
+    end;
+
+    procedure GetDeduction(DeductionID: Text; var ResponseObj: JsonObject): Boolean
+    var
+        JsonBody: JsonObject;
+        Result: Boolean;
+    begin
+        ResponseObj := SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, false, Result);
+        exit(Result);
     end;
 
     procedure GetDeduction(DeductionID: Text; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): JsonObject
     var
         JsonBody: JsonObject;
     begin
-        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, DocType, DocNo, PostedDocNo));
+        exit(SendAPIRequest('GET', GetDeductionURL(DeductionID), 'application/json', JsonBody, MapDocumentType(DocType), DocNo, PostedDocNo));
     end;
 
     local procedure GetDeductionURL(DeductionID: Text): Text
@@ -283,27 +308,34 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
     local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject): JsonObject
     var
-        ResponseObj: JsonObject;
-        ErrorText, RequestBody, ResponseText : Text;
-        Sent: Boolean;
+        Result: Boolean;
     begin
-        Sent := SendAndParse(Method, URL, ContentType, JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText);
-        InsertEntry(URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
-        if not Sent then
-            Error(ErrorText);
-        exit(ResponseObj);
+        exit(SendAPIRequest(Method, URL, ContentType, JsonBody, Enum::"BAASI Alvys Entry Doc. Type"::" ", '', '', true, Result));
     end;
 
-    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "Sales Document Type"; DocNo: Code[20]; PostedDocNo: Code[20]): JsonObject
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; ThrowError: Boolean; var Result: Boolean): JsonObject
+    begin
+        exit(SendAPIRequest(Method, URL, ContentType, JsonBody, Enum::"BAASI Alvys Entry Doc. Type"::" ", '', '', ThrowError, Result));
+    end;
+
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; PostedDocNo: Code[20]): JsonObject
+    var
+        Result: Boolean;
+    begin
+        exit(SendAPIRequest(Method, URL, ContentType, JsonBody, DocType, DocNo, PostedDocNo, true, Result));
+    end;
+
+    local procedure SendAPIRequest(Method: Text; URL: Text; ContentType: Text; var JsonBody: JsonObject; DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; PostedDocNo: Code[20]; ThrowError: Boolean; var Result: Boolean): JsonObject
     var
         ResponseObj: JsonObject;
         ErrorText, RequestBody, ResponseText : Text;
         Sent: Boolean;
     begin
         Sent := SendAndParse(Method, URL, ContentType, JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText);
-        InsertEntry(MapDocumentType(DocType, PostedDocNo), EntryDocumentNo(DocNo, PostedDocNo), URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
-        if not Sent then
+        InsertEntry(DocType, EntryDocumentNo(DocNo, PostedDocNo), URL, Method, RequestBody, ResponseText, ErrorText, Sent, true);
+        if not Sent and ThrowError then
             Error(ErrorText);
+        Result := Sent;
         exit(ResponseObj);
     end;
 
@@ -343,18 +375,15 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// PostedDocNo means the call came from a posted invoice and outranks DocType. Otherwise only
     /// orders and invoices are logged against a document; anything else has no counterpart in Alvys.
     /// </summary>
-    local procedure MapDocumentType(DocType: Enum "Sales Document Type"; PostedDocNo: Code[20]): Enum "BAASI Alvys Entry Doc. Type"
+    local procedure MapDocumentType(DocType: Enum "Sales Document Type"): Enum "BAASI Alvys Entry Doc. Type"
     begin
-        if PostedDocNo <> '' then
-            exit(Enum::"BAASI Alvys Entry Doc. Type"::"Posted Sales Invoice");
         case DocType of
             DocType::Order:
                 exit(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Order");
             DocType::Invoice:
                 exit(Enum::"BAASI Alvys Entry Doc. Type"::"Sales Invoice");
-            else
-                Error(UnsupportedDocTypeErr, DocType);
         end;
+        Error(UnsupportedDocTypeErr, DocType);
     end;
 
     /// <summary>

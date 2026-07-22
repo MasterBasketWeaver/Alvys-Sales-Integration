@@ -23,6 +23,8 @@ codeunit 80804 "BAASI Single Instance"
 
     procedure AddAlvysDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction")
     begin
+        if TempAlvysDeduction.Get(AlvysDeduction."Entry No.") then
+            exit;
         TempAlvysDeduction := AlvysDeduction;
         TempAlvysDeduction.Insert(false);
     end;
@@ -39,7 +41,35 @@ codeunit 80804 "BAASI Single Instance"
     end;
 
 
+    procedure AddDeductionRecId(DeductionRecId: RecordId; DeductionId: Text)
+    begin
+        DeductionRecIds.Add(DeductionRecId, DeductionId);
+    end;
+
+    procedure GetDeductionRecIds(): Dictionary of [RecordId, Text]
+    begin
+        exit(DeductionRecIds);
+    end;
+
+    procedure ClearDeductionRecIds()
+    begin
+        Clear(DeductionRecIds);
+    end;
+
+    procedure SetHandledSalesPosting(NewHandledSalesPosting: Boolean)
+    begin
+        HandledSalesPosting := NewHandledSalesPosting;
+    end;
+
+    procedure GetHandledSalesPosting(): Boolean
+    begin
+        exit(HandledSalesPosting);
+    end;
+
+
     var
         TempAlvysDeduction: Record "BAASI Alvys Deduction" temporary;
+        DeductionRecIds: Dictionary of [RecordId, Text];
         SalesHeaderDocNo, SalesInvHeaderDocNo : Code[20];
+        HandledSalesPosting: Boolean;
 }
