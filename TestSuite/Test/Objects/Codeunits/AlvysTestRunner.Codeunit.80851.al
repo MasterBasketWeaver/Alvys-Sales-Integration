@@ -22,6 +22,10 @@ codeunit 80851 "BAASIT Alvys Test Runner"
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
     begin
+        // Returning false leaves the test out of the run entirely: it is not executed and
+        // OnAfterTestRun never fires for it, so it is not logged and not counted.
+        if TestMode.SkipTest(CodeunitId, FunctionName) then
+            exit(false);
         this.StartTime := CurrentDateTime();
         exit(true);
     end;
@@ -57,5 +61,6 @@ codeunit 80851 "BAASIT Alvys Test Runner"
     end;
 
     var
+        TestMode: Codeunit "BAASIT Test Mode";
         StartTime: DateTime;
 }

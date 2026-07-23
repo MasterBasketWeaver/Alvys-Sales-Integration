@@ -19,6 +19,10 @@ codeunit 80854 "BAASIT Test Runner No Rollback"
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
     begin
+        // Returning false leaves the test out of the run entirely: it is not executed and
+        // OnAfterTestRun never fires for it, so it is not logged and not counted.
+        if TestMode.SkipTest(CodeunitId, FunctionName) then
+            exit(false);
         this.StartTime := CurrentDateTime();
         exit(true);
     end;
@@ -52,5 +56,6 @@ codeunit 80854 "BAASIT Test Runner No Rollback"
     end;
 
     var
+        TestMode: Codeunit "BAASIT Test Mode";
         StartTime: DateTime;
 }

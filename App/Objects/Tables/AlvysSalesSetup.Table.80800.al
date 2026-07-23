@@ -54,6 +54,37 @@ table 80800 "BAASI Alvys Sales Setup"
             DataClassification = CustomerContent;
             Tooltip = 'Specifies if the integration is enabled or not.';
         }
+        field(11; "Bal. Account No."; Code[20])
+        {
+            DataClassification = CustomerContent;
+            TableRelation = "G/L Account"."No." where(Blocked = const(false), "Direct Posting" = const(true));
+            Tooltip = 'The G/L account the payment side of a settled deduction is posted to.';
+        }
+        field(12; "Payment Journal Template"; Code[10])
+        {
+            DataClassification = CustomerContent;
+            TableRelation = "Gen. Journal Template".Name;
+            Tooltip = 'The general journal template a settled deduction is written to.';
+
+            trigger OnValidate()
+            begin
+                // The batch is only meaningful under the template it belongs to, so a template
+                // change leaves the batch to be picked again rather than pointing at nothing.
+                if Rec."Payment Journal Template" <> xRec."Payment Journal Template" then
+                    Rec."Payment Journal Batch" := '';
+            end;
+        }
+        field(13; "Payment Journal Batch"; Code[10])
+        {
+            DataClassification = CustomerContent;
+            TableRelation = "Gen. Journal Batch".Name where("Journal Template Name" = field("Payment Journal Template"));
+            Tooltip = 'The general journal batch a settled deduction is written to.';
+        }
+        field(14; "Auto-Post Deductions"; Boolean)
+        {
+            DataClassification = CustomerContent;
+            Tooltip = 'Specifies whether the payment journal batch is posted as soon as a settled deduction is written to it.';
+        }
     }
     keys
     {

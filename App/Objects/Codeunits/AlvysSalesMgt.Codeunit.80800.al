@@ -4,7 +4,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         tabledata "BAASI Alvys Sales Entry" = RIMD,
         tabledata "BAASI Alvys Deduction" = RIMD,
         tabledata "Dimension Set Entry" = R,
-        tabledata "Sales Invoice Header" = R;
+        tabledata "Sales Invoice Header" = R,
+        tabledata "Gen. Journal Template" = R,
+        tabledata "Gen. Journal Batch" = R,
+        tabledata "Gen. Journal Line" = RIMD;
 
 
     local procedure GetAndCheckSetup()
@@ -437,10 +440,15 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// error message. The entry table is the audit log of what Alvys sent, so losing the record of
     /// a call that failed would be the wrong way round.
     ///
+    /// A payload that does match is written to the configured payment journal as a customer payment
+    /// applied to the invoice, and the batch is posted when the setup asks for it.
+    ///
     /// Every failure is answered 400, with the reason as the error text.
     /// </summary>
     internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text)
     var
+        AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
+        SalesInvHeader: Record "Sales Invoice Header";
         ErrorText: Text;
     begin
         // The AL runtime gives an API page no access to the HTTP request it is serving, so the
@@ -448,28 +456,36 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysEntry.Method := ApplyDeductionMethodTok;
         AlvysEntry.URL := ApplyDeductionURLTok;
         AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
-        AlvysEntry."Document No." := ApplyDeductionDocumentNo(DeductionId, ErrorText);
+        AlvysEntry."Document No." := ApplyDeductionDocumentNo(DeductionId, SalesInvHeader, ErrorText);
         // The deduction Id is what the settlement is matched on, so it is resolved first and its
         // reason is the one reported. The rest of the payload is only worth checking once there is
         // an invoice to apply against.
         if ErrorText = '' then
             ErrorText := ApplyDeductionPayloadError(TruckId, TruckNumber, Amount, SettlementDate);
+        // The journal a settlement is written to is configured rather than derived, so the setup is
+        // checked last: a payload that was never going to apply should report its own reason, not
+        // the configuration's.
+        if ErrorText = '' then
+            ErrorText := ApplyDeductionSetupError(AlvysSalesSetup);
+        if ErrorText = '' then
+            ErrorText := ApplyDeductionPayment(AlvysSalesSetup, SalesInvHeader, Amount, SettlementDate);
         if ErrorText <> '' then
             AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
         PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
     end;
 
     /// <summary>
-    /// Resolves the deduction Alvys settled to the posted sales invoice it was raised against.
+    /// Resolves the deduction Alvys settled to the posted sales invoice it was raised against, and
+    /// hands the invoice back so the payment can be applied to it without looking it up twice.
     /// Returns a blank document number and the reason in ErrorText when no invoice can be reached.
     /// Each reason names what was missing, so whoever reads the log can tell a deduction waiting on
     /// an unposted document from one Business Central has no record of at all.
     /// </summary>
-    local procedure ApplyDeductionDocumentNo(DeductionId: Text; var ErrorText: Text): Code[20]
+    local procedure ApplyDeductionDocumentNo(DeductionId: Text; var SalesInvHeader: Record "Sales Invoice Header"; var ErrorText: Text): Code[20]
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
-        SalesInvHeader: Record "Sales Invoice Header";
     begin
+        Clear(SalesInvHeader);
         if DeductionId = '' then begin
             ErrorText := ApplyBlankDeductionErr;
             exit('');
@@ -516,6 +532,113 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             exit(ApplyMissingSettlementDateErr);
 
         exit('');
+    end;
+
+    /// <summary>
+    /// Checks the setup names the journal a settlement is written to and the account its payment
+    /// side is posted to, and hands the setup back to whoever passed the check. The reason is
+    /// returned rather than raised: a settlement Alvys sent is logged whatever stopped it, and a
+    /// TestField here would roll the entry back along with the reason it carries.
+    /// </summary>
+    local procedure ApplyDeductionSetupError(var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"): Text
+    begin
+        if not AlvysSalesSetup.Get() then
+            exit(ApplySetupMissingErr);
+
+        if AlvysSalesSetup."Payment Journal Template" = '' then
+            exit(StrSubstNo(ApplySetupFieldBlankErr, AlvysSalesSetup.FieldCaption("Payment Journal Template")));
+
+        if AlvysSalesSetup."Payment Journal Batch" = '' then
+            exit(StrSubstNo(ApplySetupFieldBlankErr, AlvysSalesSetup.FieldCaption("Payment Journal Batch")));
+
+        if AlvysSalesSetup."Bal. Account No." = '' then
+            exit(StrSubstNo(ApplySetupFieldBlankErr, AlvysSalesSetup.FieldCaption("Bal. Account No.")));
+
+        exit('');
+    end;
+
+    /// <summary>
+    /// Writes the settlement to the configured payment journal and posts the batch when the setup
+    /// asks for it. Returns the reason posting failed, or a blank text when there is nothing to
+    /// report.
+    ///
+    /// A batch that will not post is caught rather than raised. The line is already written, so the
+    /// settlement is not lost by the failure — it is left in the journal for someone to correct and
+    /// post by hand, and the reason goes to the entry log and back to Alvys.
+    /// </summary>
+    local procedure ApplyDeductionPayment(AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; SalesInvHeader: Record "Sales Invoice Header"; Amount: Decimal; SettlementDate: Date): Text
+    var
+        GenJnlLine: Record "Gen. Journal Line";
+    begin
+        InsertPaymentJournalLine(AlvysSalesSetup, SalesInvHeader, Amount, SettlementDate, GenJnlLine);
+        if not AlvysSalesSetup."Auto-Post Deductions" then
+            exit('');
+
+        // Codeunit.Run rolls its own work back when it fails, and the line written above is inside
+        // that transaction, so it is committed first. Posting is the last thing this call does, so
+        // the commit hands nothing else over early.
+        Commit();
+        if not Codeunit.Run(Codeunit::"Gen. Jnl.-Post Batch", GenJnlLine) then
+            exit(StrSubstNo(ApplyPostingFailedErr, AlvysSalesSetup."Payment Journal Template", AlvysSalesSetup."Payment Journal Batch", GetLastErrorText()));
+        exit('');
+    end;
+
+    /// <summary>
+    /// Builds the payment that clears the settled deduction: a customer line on the bill-to customer
+    /// of the invoice, balanced against the configured G/L account and applied to the invoice.
+    ///
+    /// The settlement arrives negative, and the line carries it through unchanged. A customer line
+    /// credits the customer when its amount is negative, which is what pays the receivable down; a
+    /// cash receipts template refuses a positive one outright.
+    ///
+    /// The line is set up the way the payment journal page sets one up by hand, so it takes the
+    /// batch's defaults and its document number from the batch's number series.
+    ///
+    /// It also takes the invoice's dimensions rather than the customer's. The settlement belongs to
+    /// the entity and the tractor the invoice was raised under, and the balancing account carries a
+    /// mandatory entity dimension the customer's own defaults do not supply, so a line dimensioned
+    /// from the customer will not post at all.
+    /// </summary>
+    local procedure InsertPaymentJournalLine(AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; SalesInvHeader: Record "Sales Invoice Header"; SettlementAmount: Decimal; SettlementDate: Date; var GenJnlLine: Record "Gen. Journal Line")
+    var
+        LastGenJnlLine: Record "Gen. Journal Line";
+        DimMgt: Codeunit DimensionManagement;
+        LineNo: Integer;
+    begin
+        LastGenJnlLine.SetRange("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
+        LastGenJnlLine.SetRange("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
+        if LastGenJnlLine.FindLast() then
+            LineNo := LastGenJnlLine."Line No." + 10000
+        else
+            LineNo := 10000;
+
+        GenJnlLine.Init();
+        GenJnlLine.Validate("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
+        GenJnlLine.Validate("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
+        GenJnlLine."Line No." := LineNo;
+        GenJnlLine.SetUpNewLine(LastGenJnlLine, 0, true);
+        // The settlement date is the date the payment is posted under; Gen. Journal Line has no
+        // separate payment date of its own.
+        GenJnlLine.Validate("Posting Date", SettlementDate);
+        GenJnlLine.Validate("Document Type", GenJnlLine."Document Type"::Payment);
+        GenJnlLine.Validate("Account Type", GenJnlLine."Account Type"::Customer);
+        GenJnlLine.Validate("Account No.", SalesInvHeader."Bill-to Customer No.");
+        GenJnlLine.Validate("Bal. Account Type", GenJnlLine."Bal. Account Type"::"G/L Account");
+        GenJnlLine.Validate("Bal. Account No.", AlvysSalesSetup."Bal. Account No.");
+        GenJnlLine.Validate(Amount, SettlementAmount);
+        GenJnlLine.Validate("Applies-to Doc. Type", GenJnlLine."Applies-to Doc. Type"::Invoice);
+        GenJnlLine.Validate("Applies-to Doc. No.", SalesInvHeader."No.");
+        // Last, because validating the accounts above rebuilds the dimension set from their own
+        // defaults and would undo this.
+        //
+        // Entity is this company's global dimension 1, and posting reads a global dimension off the
+        // line's shortcut field rather than out of the dimension set. Setting the set alone leaves
+        // that field blank and the balancing account refuses the line for a missing entity, so the
+        // shortcuts are brought along too. Gen. Journal Line does not do this on validate the way
+        // some other tables do.
+        GenJnlLine.Validate("Dimension Set ID", SalesInvHeader."Dimension Set ID");
+        DimMgt.UpdateGlobalDimFromDimSetID(GenJnlLine."Dimension Set ID", GenJnlLine."Shortcut Dimension 1 Code", GenJnlLine."Shortcut Dimension 2 Code");
+        GenJnlLine.Insert(true);
     end;
 
     /// <summary>
@@ -594,6 +717,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         ApplyMissingTruckErr: Label 'The payload names no truck: the truck Id and the truck number are both blank.';
         ApplyInvalidAmountErr: Label 'The payload has an amount of %1. A settlement has to apply an amount less than zero.', Comment = '%1 = Amount';
         ApplyMissingSettlementDateErr: Label 'The payload has no settlement date.';
+        ApplySetupMissingErr: Label 'The Alvys Sales Setup has not been filled in, so the settlement has no journal to be written to.';
+        ApplySetupFieldBlankErr: Label 'The Alvys Sales Setup has no %1, so the settlement has no journal to be written to.', Comment = '%1 = the blank setup field''s caption';
+        ApplyPostingFailedErr: Label 'The settlement was written to journal batch %1 %2, but the batch could not be posted: %3', Comment = '%1 = Payment Journal Template, %2 = Payment Journal Batch, %3 = the posting error';
         NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
         DeductionNotPostedErr: Label 'Deduction %1 is on %2 %3, which has not been posted yet.', Comment = '%1 = Deduction Id, %2 = Document Type, %3 = Document No.';
         NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on the deduction with Id %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';

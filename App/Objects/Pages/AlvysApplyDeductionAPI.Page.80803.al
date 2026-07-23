@@ -17,8 +17,10 @@ page 80803 "BAASI Alvys Apply Ded. API"
     // answered 400 with the reason. The checks live with the matching in PrepareApplyDeductionEntry,
     // so the log is written on every path.
     //
-    // Generating the payment journal from the matched invoice is a separate step, still blocked on
-    // the offset G/L account.
+    // A payload that does match is written to the payment journal named on the Alvys Sales Setup as
+    // a customer payment applied to the invoice, and the batch is posted when the setup asks for it.
+    // A settlement the setup has no journal for, or a batch that will not post, is refused the same
+    // way — logged, then answered 400 with the reason.
 
     PageType = API;
     APIPublisher = 'tanager';

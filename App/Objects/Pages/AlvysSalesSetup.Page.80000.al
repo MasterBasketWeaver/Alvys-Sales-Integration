@@ -24,6 +24,22 @@ page 80800 "BAASI Alvys Sales Setup"
                         ShowMandatory = true;
                     }
                 }
+                group("Payment Journal")
+                {
+                    field("Payment Journal Template"; Rec."Payment Journal Template")
+                    {
+                        ShowMandatory = true;
+                    }
+                    field("Payment Journal Batch"; Rec."Payment Journal Batch")
+                    {
+                        ShowMandatory = true;
+                    }
+                    field("Bal. Account No."; Rec."Bal. Account No.")
+                    {
+                        ShowMandatory = true;
+                    }
+                    field("Auto-Post Deductions"; Rec."Auto-Post Deductions") { }
+                }
                 group(Integration)
                 {
 

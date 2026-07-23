@@ -284,6 +284,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         // [SCENARIO] A driver pay call from Alvys is logged to the entry table as an inbound entry,
         // with the method and URL of the endpoint it arrived on.
         Initialize();
+        RequirePaymentJournalSetup();
 
         // [WHEN] Alvys posts a driver pay payload to the API page
         InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry);
@@ -422,6 +423,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     begin
         // [SCENARIO] Either truck field on its own names the truck, so neither one alone is refused.
         Initialize();
+        RequirePaymentJournalSetup();
 
         // [WHEN] A payload arrives with the truck Id only, and another with the truck number only
         InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '', -55.0, WorkDate(), AlvysEntry);
@@ -523,6 +525,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         // [SCENARIO] A payload that does match a posted invoice carries no error, so the API page
         // has nothing to refuse it on and Alvys is answered 201.
         Initialize();
+        RequirePaymentJournalSetup();
 
         // [WHEN] Alvys settles a deduction that is linked to a posted invoice
         InsertInboundEntry(LoggedDeductionId(PostedSalesInvoiceNo()), AlvysEntry);
@@ -743,6 +746,33 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         AlvysSetup.Modify();
 
         Clear(AlvysSalesMgt);
+    end;
+
+    /// <summary>
+    /// The journal a settled deduction is written to is company configuration, not something a test
+    /// may seed. Only the tests that expect a settlement to go through need it, so the requirement
+    /// is stated where it applies rather than in Initialize, which would fail the outbound tests for
+    /// a setting they never touch.
+    ///
+    /// These tests are about the matching: that a payload Alvys sent is resolved to the right posted
+    /// invoice and left with nothing to refuse it on. They deliberately do not post. Posting is a
+    /// question about a real document -- whether the invoice, its customer's receivable and the
+    /// balancing account agree on their dimensions -- and the deduction it needs has to have been
+    /// raised from that invoice, not stapled to whichever invoice happens to be last in the company.
+    /// Codeunit "BAASIT Fleetrock E2E Tests" owns that leg, on the invoice its own run posted.
+    ///
+    /// So auto-posting is required to be off rather than merely assumed to be: with it on, these
+    /// tests fail on a company setting rather than on anything they are testing.
+    /// </summary>
+    local procedure RequirePaymentJournalSetup()
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+    begin
+        AlvysSetup.Get();
+        AlvysSetup.TestField("Payment Journal Template");
+        AlvysSetup.TestField("Payment Journal Batch");
+        AlvysSetup.TestField("Bal. Account No.");
+        AlvysSetup.TestField("Auto-Post Deductions", false);
     end;
 
     /// <summary>

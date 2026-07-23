@@ -18,7 +18,10 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
     procedure InvoicedRepairOrderIsImportedPostedAndDeducted()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        CustLedgEntry: Record "Cust. Ledger Entry";
         DimSetEntry: Record "Dimension Set Entry";
+        GenJnlLine: Record "Gen. Journal Line";
         JobQueueEntry: Record "Job Queue Entry";
         RepairHeaderStaging: Record "FRI Repair Header";
         SalesHeader: Record "Sales Header";
@@ -145,6 +148,38 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         AmountObj := JsonTkn.AsObject();
         Assert.AreEqual(-205.0, JsonMgt.GetJsonValueAsDecimal(AmountObj, 'Amount'), 'The Alvys deduction amount should be the negated invoice total.');
 
+        // [WHEN] Alvys settles that deduction and posts the driver pay call back to Business Central.
+        // The deduction carries the invoice it was raised from, so the settlement resolves its own
+        // invoice rather than being pointed at one -- the leg the unit tests cannot cover, because
+        // there the deduction and the invoice are only linked by hand.
+        AlvysEntry.Init();
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SalesInvHeader."Posting Date", 'Settlement for repair order ' + ROId);
+        AlvysEntry.Insert(true);
+
+        // [THEN] The settlement matched the invoice the deduction was raised from
+        Assert.AreEqual('', AlvysEntry."Error Message", StrSubstNo('The settlement should apply cleanly: %1', AlvysEntry."Error Message"));
+        Assert.AreEqual(SalesInvHeader."No.", AlvysEntry."Document No.", 'The settlement should be matched to the invoice the deduction was raised from.');
+
+        // [THEN] The payment reached the payment journal, or the customer ledger when the setup
+        // posts it. Auto-posting is configuration rather than something this test may seed, so both
+        // settings are checked for the outcome they should produce.
+        GenJnlLine.SetRange("Journal Template Name", AlvysSetup."Payment Journal Template");
+        GenJnlLine.SetRange("Journal Batch Name", AlvysSetup."Payment Journal Batch");
+        GenJnlLine.SetRange("Applies-to Doc. No.", SalesInvHeader."No.");
+        if AlvysSetup."Auto-Post Deductions" then begin
+            Assert.IsTrue(GenJnlLine.IsEmpty(), 'A posted settlement should leave no line behind in the payment journal.');
+            CustLedgEntry.SetRange("Customer No.", SalesInvHeader."Bill-to Customer No.");
+            CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Payment);
+            Assert.IsTrue(CustLedgEntry.FindLast(), 'Posting the settlement should create a customer payment entry.');
+            CustLedgEntry.CalcFields(Amount);
+            Assert.AreEqual(AlvysDeduction.Amount, CustLedgEntry.Amount, 'The posted payment should carry the settled amount.');
+        end else begin
+            Assert.IsTrue(GenJnlLine.FindLast(), 'The settlement should be written to the payment journal.');
+            Assert.AreEqual(AlvysDeduction.Amount, GenJnlLine.Amount, 'The journal line should carry the settled amount.');
+            Assert.AreEqual(SalesInvHeader."Bill-to Customer No.", GenJnlLine."Account No.", 'The journal line should be for the invoice bill-to customer.');
+            Assert.AreEqual(SalesInvHeader."Dimension Set ID", GenJnlLine."Dimension Set ID", 'The journal line should carry the dimensions of the invoice it settles.');
+        end;
+
         // On a keep-data run the external clean-up is skipped along with the rollback, so the
         // repair order, the documents and the deduction survive for inspection.
         if TestMode.GetKeepData() then
@@ -177,6 +212,11 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
         AlvysSetup.TestField("Tractor Code Dimension");
+        // The run settles the deduction the posting creates, so the company needs the journal that
+        // settlement is written to as well.
+        AlvysSetup.TestField("Payment Journal Template");
+        AlvysSetup.TestField("Payment Journal Batch");
+        AlvysSetup.TestField("Bal. Account No.");
 
         FleetrockSetup.Get();
         FleetrockSetup.TestField("Integration URL");
@@ -250,6 +290,10 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
     /// </summary>
     local procedure DeleteRepairOrder(ROId: Text)
     begin
+        // Fleetrock puts the paid date back when the invoiced date is set, the same way AddRO
+        // defaults both to the finished date, and it refuses to drop the invoiced date while a paid
+        // date is there. So the paid date comes off first, exactly as SetRepairOrderToInvoiced does.
+        UpdateRepairOrder(ROId, 'date_invoice_paid', 'delete');
         UpdateRepairOrder(ROId, 'date_invoiced', 'delete');
         UpdateRepairOrder(ROId, 'date_finished', 'delete');
         UpdateRepairOrder(ROId, 'status', 'deleted');
