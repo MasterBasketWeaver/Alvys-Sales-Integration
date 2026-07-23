@@ -30,7 +30,7 @@ codeunit 80803 "BAASI Subscribers"
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         SalesHeaderDocNo: Code[20];
         SalesInvHeaderDocNo: Code[20];
-        DeductionId: Text;
+        DeductionId, Description : Text;
     begin
         // A posting run does not always produce an invoice -- a shipment or a credit memo leaves the
         // invoice number blank -- and a preview is rolled back, so neither may reach Alvys.
@@ -44,7 +44,11 @@ codeunit 80803 "BAASI Subscribers"
 
         // Alvys deductions are negative: the invoice is deducted from the owner operator's pay.
         SalesInvoiceHeader.CalcFields("Amount Including VAT");
-        DeductionId := AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvoiceHeader, SalesInvoiceHeader."Posting Date", -SalesInvoiceHeader."Amount Including VAT", CategoryTok, StrSubstNo(DescriptionTxt, SalesInvoiceHeader."No."), PreviewMode);
+        if SalesInvoiceHeader."FRI Fleetrock Repair Order No." <> '' then
+            Description := StrSubstNo(DescriptionLoadNoTxt, SalesInvoiceHeader."Shortcut Dimension 1 Code", SalesInvoiceHeader."No.", SalesInvoiceHeader."FRI Fleetrock Repair Order No.")
+        else
+            Description := StrSubstNo(DescriptionTxt, SalesInvoiceHeader."Shortcut Dimension 1 Code", SalesInvoiceHeader."No.");
+        DeductionId := AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvoiceHeader, SalesInvoiceHeader."Posting Date", -SalesInvoiceHeader."Amount Including VAT", CategoryTok, Description, PreviewMode);
         SingleInstance.SetSalesDocuments('', '');
         if DeductionId <> '' then
             SingleInstance.AddDeductionRecId(SalesHeader.RecordId(), DeductionId);
@@ -163,5 +167,6 @@ codeunit 80803 "BAASI Subscribers"
         SingleInstance: Codeunit "BAASI Single Instance";
 
         CategoryTok: Label 'Owner Operator Invoice', Locked = true;
-        DescriptionTxt: Label 'BC Invoice %1', Comment = '%1 = Posted Sales Invoice No.';
+        DescriptionTxt: Label 'BC Invoice %1 %2', Comment = '%1 = Entity Code, %2 = Posted Sales Invoice No.';
+        DescriptionLoadNoTxt: Label 'BC Invoice %1 %2 FR Repair Order %3 ', Comment = '%1 = Entity Code, %2 = Sales Invoice Header No., %3 = Fleetrock Repair Order No.';
 }
