@@ -51,6 +51,7 @@ table 80802 "BAASI Alvys Deduction"
         field(11; "Is Paid"; Boolean)
         {
             Editable = false;
+            Tooltip = 'Whether Alvys has settled the deduction. Stamped when the deduction is created and refreshed by the settlement poll; it says what Alvys reports, not what Business Central has done about it.';
         }
         field(12; "Created By"; Code[50])
         {
@@ -66,6 +67,18 @@ table 80802 "BAASI Alvys Deduction"
         {
             Editable = false;
             Tooltip = 'The truck number the deduction was created for. This is the Tractor Code dimension value on the document, and is what the Alvys truck was resolved from.';
+        }
+        // Kept apart from "Is Paid" so a settlement that could not be applied stays eligible for the
+        // next poll to pick up again.
+        field(16; "Settlement Applied"; Boolean)
+        {
+            Editable = false;
+            Tooltip = 'Whether the settled deduction has been written to the payment journal. Set once the settlement has been applied, so that a later poll does not apply it a second time.';
+        }
+        field(17; "Settlement Applied At"; DateTime)
+        {
+            Editable = false;
+            Tooltip = 'The date and time the settlement was written to the payment journal.';
         }
         field(20; "Document Type"; Enum "BAASI Alvys Entry Doc. Type")
         {

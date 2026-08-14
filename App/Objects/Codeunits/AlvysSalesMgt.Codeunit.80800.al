@@ -265,6 +265,37 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(AlvysSetup."Integration URL" + 'deductions/' + DeductionID);
     end;
 
+    /// <summary>
+    /// One page of deductions over the range their effective dates fall in. Alvys leaves paid
+    /// deductions out unless IncludePaid asks for them. The caller reads Total off the response and
+    /// asks for the next page until it has them all.
+    /// </summary>
+    procedure SearchDeductions(StartDate: Date; EndDate: Date; IncludePaid: Boolean; PageNo: Integer; PageSize: Integer): JsonObject
+    var
+        DateRangeObj, JsonBody : JsonObject;
+    begin
+        GetAndCheckSetup();
+        if StartDate = 0D then
+            Error(MissingSearchDateErr);
+        DateRangeObj.Add('Start', SearchTimestamp(StartDate, StartOfDayTok));
+        if EndDate <> 0D then
+            DateRangeObj.Add('End', SearchTimestamp(EndDate, EndOfDayTok));
+        JsonBody.Add('Page', PageNo);
+        JsonBody.Add('PageSize', PageSize);
+        JsonBody.Add('IncludePaid', IncludePaid);
+        JsonBody.Add('DateRange', DateRangeObj);
+        exit(SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/search', 'application/json', JsonBody));
+    end;
+
+    /// <summary>
+    /// Alvys returns effective dates at midnight, so an end bound taken at midnight too would drop
+    /// the deductions dated that day.
+    /// </summary>
+    local procedure SearchTimestamp(SearchDate: Date; TimeOfDay: Text): Text
+    begin
+        exit(Format(SearchDate, 0, '<Year4>-<Month,2>-<Day,2>') + TimeOfDay);
+    end;
+
     local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]): Text
     begin
         exit(InsertDeduction(ResponseObj, TruckNumber, Enum::"BAASI Alvys Entry Doc. Type"::" ", '', ''));
@@ -446,15 +477,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// Every failure is answered 400, with the reason as the error text.
     /// </summary>
     internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text)
+    begin
+        // The AL runtime gives an API page no access to the HTTP request it is serving, so the
+        // method and URL are the endpoint's own, not read off the call.
+        PrepareApplyDeductionEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description, ApplyDeductionMethodTok, ApplyDeductionURLTok);
+    end;
+
+    /// <summary>
+    /// The same, for a settlement Business Central polled for rather than one Alvys posted, so that
+    /// it does not log itself as an HTTP call that never arrived.
+    /// </summary>
+    internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; Method: Text; URL: Text)
     var
         AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
         SalesInvHeader: Record "Sales Invoice Header";
         ErrorText: Text;
     begin
-        // The AL runtime gives an API page no access to the HTTP request it is serving, so the
-        // method and URL are the endpoint's own, not read off the call.
-        AlvysEntry.Method := ApplyDeductionMethodTok;
-        AlvysEntry.URL := ApplyDeductionURLTok;
+        AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
+        AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
         AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
         AlvysEntry."Document No." := ApplyDeductionDocumentNo(DeductionId, SalesInvHeader, ErrorText);
         // The deduction Id is what the settlement is matched on, so it is resolved first and its
@@ -713,6 +753,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         DriverIdTok: Label 'DriverId', Locked = true;
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
+        MissingSearchDateErr: Label 'A deduction search needs a date to start from.';
+        StartOfDayTok: Label 'T00:00:00Z', Locked = true;
+        EndOfDayTok: Label 'T23:59:59Z', Locked = true;
         ApplyBlankDeductionErr: Label 'The payload has no deduction Id, so there is nothing to match it to a posted invoice.';
         ApplyMissingTruckErr: Label 'The payload names no truck: the truck Id and the truck number are both blank.';
         ApplyInvalidAmountErr: Label 'The payload has an amount of %1. A settlement has to apply an amount less than zero.', Comment = '%1 = Amount';

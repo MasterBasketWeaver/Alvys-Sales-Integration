@@ -97,6 +97,20 @@ page 80800 "BAASI Alvys Sales Setup"
                     CurrPage.Update(false);
                 end;
             }
+
+            action("Poll Settled Deductions")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Asks Alvys which outstanding deductions have been settled, and writes the settlements to the payment journal. This normally runs on a schedule; use this to run it now.';
+                Image = Payment;
+
+                trigger OnAction()
+                var
+                    AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
+                begin
+                    AlvysSettlementPoll.PollSettledDeductions();
+                end;
+            }
         }
 
         area(Promoted)
@@ -106,6 +120,9 @@ page 80800 "BAASI Alvys Sales Setup"
                 Caption = 'Process';
 
                 actionref("Refresh Access Token_Promoted"; "Refresh Access Token")
+                {
+                }
+                actionref("Poll Settled Deductions_Promoted"; "Poll Settled Deductions")
                 {
                 }
             }

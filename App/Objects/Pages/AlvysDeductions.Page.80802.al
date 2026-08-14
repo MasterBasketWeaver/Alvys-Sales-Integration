@@ -32,6 +32,8 @@ page 80802 "BAASI Alvys Deductions"
                 field("Driver Id"; Rec."Driver Id") { }
                 field(Date; Rec.Date) { }
                 field("Is Paid"; Rec."Is Paid") { }
+                field("Settlement Applied"; Rec."Settlement Applied") { }
+                field("Settlement Applied At"; Rec."Settlement Applied At") { }
                 field("Document Type"; Rec."Document Type") { }
                 field("Document No."; Rec."Document No.") { }
                 field("Posted Document No."; Rec."Posted Document No.") { }

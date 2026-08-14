@@ -83,14 +83,14 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         // [THEN] The invoice has one labor line and one part line with the repair order's amounts
         SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
         SalesLine.SetRange("Document No.", InvoiceNo);
-        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        SalesLine.SetRange(Type, SalesLine.Type::"G/L Account");
         Assert.AreEqual(2, SalesLine.Count(), 'The invoice should have exactly one labor line and one part line.');
-        SalesLine.SetRange("No.", FleetrockSetup."Labor Item No.");
+        SalesLine.SetRange("No.", FleetrockSetup."Labor G/L Account No.");
         Assert.IsTrue(SalesLine.FindFirst(), 'The invoice should have a labor line.');
         Assert.AreEqual(2.0, SalesLine.Quantity, 'The labor line quantity should be the labor hours.');
         Assert.AreEqual(75.0, SalesLine."Unit Price", 'The labor line unit price should be the hourly rate.');
         Assert.AreEqual(150.0, SalesLine."Line Amount", 'The labor line amount should be the labor subtotal.');
-        SalesLine.SetRange("No.", FleetrockSetup."Parts Item No.");
+        SalesLine.SetRange("No.", FleetrockSetup."Parts G/L Account No.");
         Assert.IsTrue(SalesLine.FindFirst(), 'The invoice should have a part line.');
         Assert.AreEqual(2.0, SalesLine.Quantity, 'The part line quantity should be the part quantity.');
         Assert.AreEqual(27.5, SalesLine."Unit Price", 'The part line unit price should be the part price.');
@@ -111,7 +111,7 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         SalesLine.Reset();
         SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
         SalesLine.SetRange("Document No.", InvoiceNo);
-        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        SalesLine.SetRange(Type, SalesLine.Type::"G/L Account");
         SalesLine.FindSet(true);
         repeat
             SalesLine."Location Code" := 'TEST';

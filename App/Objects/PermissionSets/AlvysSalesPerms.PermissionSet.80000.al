@@ -16,6 +16,7 @@ permissionset 80800 "BAASI Alvys Perms."
         page "BAASI Alvys Deductions" = X,
         page "BAASI Alvys Apply Ded. API" = X,
         codeunit "BAASI Alvys Sales Mgt." = X,
+        codeunit "BAASI Alvys Settlement Poll" = X,
         codeunit "BAASI Install" = X,
         codeunit "BAASI Subscribers" = X,
         codeunit "BAASI Upgrade" = X,
