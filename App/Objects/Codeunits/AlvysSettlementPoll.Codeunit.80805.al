@@ -48,9 +48,6 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
                     LatestDate := AlvysDeduction.Date;
             until AlvysDeduction.Next() = 0;
 
-        if EarliestDate = 0D then
-            exit;
-
         CollectPaidIds(EarliestDate, LatestDate, PaidIds);
 
         foreach DeductionId in PaidIds do
