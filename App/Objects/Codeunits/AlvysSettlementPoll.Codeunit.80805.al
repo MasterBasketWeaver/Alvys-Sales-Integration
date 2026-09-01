@@ -29,21 +29,23 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     begin
         AlvysDeduction.SetRange("Is Paid", false);
         AlvysDeduction.SetFilter("Posted Document No.", '<>%1', '');
+        AlvysDeduction.SetFilter(Id, '<>%1', '');
+        // A dateless deduction taken as a bound would collapse the range and stop the ones
+        // that do carry a date from being asked about at all.
+        AlvysDeduction.SetFilter(Date, '<>%1', 0D);
         if not AlvysDeduction.FindSet() then
             exit;
-        repeat
-            if AlvysDeduction.Id <> '' then begin
-                PendingIds.Set(SearchKey(AlvysDeduction.Id), AlvysDeduction."Entry No.");
-                // A dateless deduction taken as a bound would collapse the range and stop the ones
-                // that do carry a date from being asked about at all.
-                if AlvysDeduction.Date <> 0D then begin
-                    if (EarliestDate = 0D) or (AlvysDeduction.Date < EarliestDate) then
-                        EarliestDate := AlvysDeduction.Date;
-                    if AlvysDeduction.Date > LatestDate then
-                        LatestDate := AlvysDeduction.Date;
-                end;
-            end;
-        until AlvysDeduction.Next() = 0;
+
+        PendingIds.Set(SearchKey(AlvysDeduction.Id), AlvysDeduction."Entry No.");
+        EarliestDate := AlvysDeduction.Date;
+        LatestDate := AlvysDeduction.Date;
+        if AlvysDeduction.Next() <> 0 then
+            repeat
+                if AlvysDeduction.Date < EarliestDate then
+                    EarliestDate := AlvysDeduction.Date;
+                if AlvysDeduction.Date > LatestDate then
+                    LatestDate := AlvysDeduction.Date;
+            until AlvysDeduction.Next() = 0;
 
         if EarliestDate = 0D then
             exit;
