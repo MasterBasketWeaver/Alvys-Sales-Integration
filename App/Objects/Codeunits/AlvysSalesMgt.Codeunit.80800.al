@@ -51,13 +51,13 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         SendTime := CurrentDateTime();
         JsonBody.Add('client_id', AlvysSalesSetup."Client ID");
         JsonBody.Add('client_secret', AlvysSalesSetup."Client Secret");
-        JsonBody.Add('audience', AudienceLbl);
+        JsonBody.Add('audience', 'https://api.alvys.com/public/');
         JsonBody.Add('grant_type', 'client_credentials');
         JsonBody.WriteTo(RequestBody);
         // the token request is not logged, as the request body contains the client secret
         // and the response contains the access token
         PrepareHeaderValues('', RequestHeaderValues);
-        Sent := RESTAPIMgt.TrySendJsonRequest('POST', TokenURLLbl, 'application/json', RequestBody, RequestHeaderValues, ResponseObj, ResponseText, ErrorText);
+        Sent := RESTAPIMgt.TrySendJsonRequest('POST', 'https://auth.alvys.com/oauth/token', 'application/json', RequestBody, RequestHeaderValues, ResponseObj, ResponseText, ErrorText);
         if not Sent then
             Error(ErrorText);
         AccessToken := JsonMgt.GetJsonValueAsText(ResponseObj, 'access_token');
@@ -403,7 +403,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     begin
         Clear(RequestHeaderValues);
         if AccessToken <> '' then
-            RequestHeaderValues.Add('Authorization', StrSubstNo(BearerTok, AccessToken));
+            RequestHeaderValues.Add('Authorization', StrSubstNo('Bearer %1', AccessToken));
         RequestHeaderValues.Add('Accept', 'application/json');
     end;
 
@@ -480,7 +480,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     begin
         // The AL runtime gives an API page no access to the HTTP request it is serving, so the
         // method and URL are the endpoint's own, not read off the call.
-        PrepareApplyDeductionEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description, ApplyDeductionMethodTok, ApplyDeductionURLTok);
+        PrepareApplyDeductionEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description, 'POST', '/api/tanager/alvys/v1.0/alvysApplyDeductions');
     end;
 
     /// <summary>
@@ -743,9 +743,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonMgt: Codeunit "BAAPI Json Mgt.";
         RESTAPIMgt: Codeunit "BAAPI REST API Mgt.";
         LoadedSetup: Boolean;
-        BearerTok: Label 'Bearer %1', Locked = true, Comment = '%1 = Access Token';
-        TokenURLLbl: Label 'https://auth.alvys.com/oauth/token', Locked = true;
-        AudienceLbl: Label 'https://api.alvys.com/public/', Locked = true;
         TokenMissingErr: Label 'access_token not found in response:\%1', Comment = '%1 = Response Text';
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';
@@ -766,8 +763,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
         DeductionNotPostedErr: Label 'Deduction %1 is on %2 %3, which has not been posted yet.', Comment = '%1 = Deduction Id, %2 = Document Type, %3 = Document No.';
         NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on the deduction with Id %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';
-        ApplyDeductionMethodTok: Label 'POST', Locked = true;
-        ApplyDeductionURLTok: Label '/api/tanager/alvys/v1.0/alvysApplyDeductions', Locked = true;
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
         UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
 }
