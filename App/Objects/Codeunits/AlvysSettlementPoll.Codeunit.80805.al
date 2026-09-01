@@ -41,6 +41,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         LatestDate := AlvysDeduction.Date;
         if AlvysDeduction.Next() <> 0 then
             repeat
+                PendingIds.Set(SearchKey(AlvysDeduction.Id), AlvysDeduction."Entry No.");
                 if AlvysDeduction.Date < EarliestDate then
                     EarliestDate := AlvysDeduction.Date;
                 if AlvysDeduction.Date > LatestDate then
