@@ -9,6 +9,11 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
 
     trigger OnRun()
     begin
+        // How the job queue reaches the poll. A scheduled run must not lose the rest of its work to
+        // one deduction Business Central or another extension refuses, so it logs what stopped that
+        // one and carries on. A run started by hand from the setup page calls PollSettledDeductions
+        // directly, leaving this false, so whoever pressed the action is shown the error instead.
+        ScheduledRun := true;
         PollSettledDeductions();
     end;
 
@@ -109,7 +114,32 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
 
         foreach EntryNo in EntryNos do
             if AlvysDeduction.Get(EntryNo) then
-                ApplySettledDeduction(AlvysDeduction);
+                if ScheduledRun then begin
+                    ClearLastError();
+                    if not Codeunit.Run(Codeunit::"BAASI Apply Settled Deduction", AlvysDeduction) then
+                        LogFailedSettlement(EntryNo, GetLastErrorText(), GetLastErrorCallStack());
+                end else
+                    ApplySettledDeduction(AlvysDeduction);
+    end;
+
+    /// <summary>
+    /// Records a settlement an error stopped outright, for a scheduled run that has swallowed it to
+    /// stay alive. The failure rolled its own attempt back, so the entry is committed to survive
+    /// whatever the rest of the run does. The deduction keeps Settlement Applied false and is left
+    /// for the next poll to try again.
+    /// </summary>
+    local procedure LogFailedSettlement(EntryNo: Integer; ErrorText: Text; ErrorStack: Text)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        if not AlvysDeduction.Get(EntryNo) then
+            exit;
+        AlvysEntry.Init();
+        AlvysSalesMgt.PrepareFailedSettlementEntry(
+            AlvysEntry, AlvysDeduction, WorkDate(), ErrorText, ErrorStack, PollMethodTok, PollURLTok);
+        AlvysEntry.Insert(true);
+        Commit();
     end;
 
     /// <summary>
@@ -147,6 +177,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
 
     var
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+        ScheduledRun: Boolean;
         JsonMgt: Codeunit "BAAPI Json Mgt.";
         PollMethodTok: Label 'POLL', Locked = true;
         PollURLTok: Label 'deductions/search', Locked = true;

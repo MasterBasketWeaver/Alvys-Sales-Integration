@@ -515,6 +515,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
+    /// Logs a settlement that was stopped before it could be attempted, by a validation this
+    /// codeunit does not raise itself -- one from Business Central or another extension. The
+    /// scheduled poll catches those so a single deduction cannot take the rest of the run with it,
+    /// and this records what was tried and what stopped it, in the same shape as a settlement that
+    /// failed one of the checks above.
+    /// </summary>
+    internal procedure PrepareFailedSettlementEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; var AlvysDeduction: Record "BAASI Alvys Deduction"; SettlementDate: Date; ErrorText: Text; ErrorStack: Text; Method: Text; URL: Text)
+    begin
+        AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
+        AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
+        AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
+        AlvysEntry."Document No." := AlvysDeduction."Posted Document No.";
+        AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
+        PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate, AlvysDeduction.Description));
+        AlvysEntry.SetErrorStack(ErrorStack);
+    end;
+
+    /// <summary>
     /// Resolves the deduction Alvys settled to the posted sales invoice it was raised against, and
     /// hands the invoice back so the payment can be applied to it without looking it up twice.
     /// Returns a blank document number and the reason in ErrorText when no invoice can be reached.
