@@ -1,30 +1,20 @@
-codeunit 80854 "BAASIT Test Runner No Rollback"
+codeunit 80858 "BAASIT E2E Test Runner"
 {
-    // The no-rollback twin of codeunit "BAASIT Alvys Test Runner": TestIsolation is a compile-time
-    // property, so keeping data after a run needs its own runner. Everything a run creates stays
-    // in Business Central, and the tests read the keep-data flag (codeunit "BAASIT Test Mode") to
-    // also leave their repair orders in Fleetrock and their deductions in Alvys. Use it to inspect
-    // the documents a run produces; the regular runner remains the default.
+    // Runs one phase of the chained end-to-end suite. Isolation is off because the chain has to
+    // survive the run: the invoice, the deduction and the run record the seed phase leaves behind
+    // are what the poll phase, in a later session, asserts against.
 
     Subtype = TestRunner;
     TestIsolation = Disabled;
 
     trigger OnRun()
     begin
-        // Keep this list identical to the one in codeunit "BAASIT Alvys Test Runner", so both
-        // runners always cover the same suite.
-        Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
-        // Codeunit "BAASIT Alvys Poll E2E Tests" is deliberately not here. Its two phases have a
-        // manual settlement in the Alvys web UI between them, so it cannot run unattended as part
-        // of the suite; codeunit "BAASIT E2E Test Runner" runs it a phase at a time instead.
+        Codeunit.Run(Codeunit::"BAASIT Alvys Poll E2E Tests");
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
     begin
-        // Returning false leaves the test out of the run entirely: it is not executed and
-        // OnAfterTestRun never fires for it, so it is not logged and not counted.
-        if TestMode.SkipTest(CodeunitId, FunctionName) then
+        if not E2EContext.ShouldRun(FunctionName) then
             exit(false);
         this.StartTime := CurrentDateTime();
         exit(true);
@@ -59,6 +49,6 @@ codeunit 80854 "BAASIT Test Runner No Rollback"
     end;
 
     var
-        TestMode: Codeunit "BAASIT Test Mode";
+        E2EContext: Codeunit "BAASIT E2E Context";
         StartTime: DateTime;
 }

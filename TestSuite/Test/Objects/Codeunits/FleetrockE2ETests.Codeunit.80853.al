@@ -42,11 +42,11 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
 
         // [GIVEN] A repair order in Fleetrock for unit 567 with one task (2h x $75.00 labor) and
         // one part (2 x $27.50), so the grand total is $205.00
-        ROId := CreateRepairOrder();
+        ROId := ROHelper.CreateRepairOrder(UnitVinTok);
 
         // [GIVEN] The repair order is invoiced in Fleetrock as of yesterday
-        SetRepairOrderToInvoiced(ROId);
-        ROObj := GetRepairOrder(ROId);
+        ROHelper.SetRepairOrderToInvoiced(ROId);
+        ROObj := ROHelper.GetRepairOrder(ROId);
         Assert.AreEqual('Invoiced', JsonMgt.GetJsonValueAsText(ROObj, 'status'), 'The repair order should be Invoiced in Fleetrock after the update.');
         Assert.AreEqual(205.0, JsonMgt.GetJsonValueAsDecimal(ROObj, 'grand_total'), 'The Fleetrock grand total should match the task and part amounts the order was created with.');
         Assert.AreEqual('567', JsonMgt.GetJsonValueAsText(ROObj, 'unit_number'), 'The repair order should be for unit 567.');
@@ -61,7 +61,7 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         // [THEN] A sales invoice was created for the repair order
         SalesHeader.SetRange("Document Type", SalesHeader."Document Type"::Invoice);
         SalesHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
-        Assert.IsTrue(SalesHeader.FindFirst(), StrSubstNo('A sales invoice should have been created for repair order %1.%2', ROId, GetStagingError(ROId)));
+        Assert.IsTrue(SalesHeader.FindFirst(), StrSubstNo('A sales invoice should have been created for repair order %1.%2', ROId, ROHelper.GetStagingError(ROId)));
         InvoiceNo := SalesHeader."No.";
         Assert.AreEqual(ROId, Format(SalesHeader."External Document No."), 'The repair order id should be carried as the external document number when the order has no PO number.');
 
@@ -191,8 +191,8 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         Assert.IsFalse(AlvysSalesMgt.DoesDeductionExist(AlvysDeduction.Id), 'The deduction should be deleted from Alvys after the test.');
 
         // [THEN] The repair order can be walked back from Invoiced and deleted in Fleetrock
-        DeleteRepairOrder(ROId);
-        ROObj := GetRepairOrder(ROId);
+        ROHelper.DeleteRepairOrder(ROId);
+        ROObj := ROHelper.GetRepairOrder(ROId);
         Assert.AreEqual('Deleted', JsonMgt.GetJsonValueAsText(ROObj, 'status'), 'The repair order should be deleted in Fleetrock after the test.');
     end;
 
@@ -228,120 +228,6 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         FleetrockSetup.TestField("Use API Token", false);
 
         Clear(AlvysSalesMgt);
-        Clear(FleetrockMgt);
-    end;
-
-    /// <summary>
-    /// Creates a repair order in Fleetrock through the AddRO API for unit 567 (a unit whose number
-    /// matches an active Alvys truck) with one labor task and one part. AddRO defaults the
-    /// invoiced and paid dates to the finished date, so the order comes back as Paid until
-    /// SetRepairOrderToInvoiced moves it to Invoiced.
-    /// </summary>
-    local procedure CreateRepairOrder() ROId: Text
-    var
-        JsonBody, ROJson, TaskJson, PartJson, ResponseObj : JsonObject;
-        ROArray, TaskArray, PartArray : JsonArray;
-    begin
-        PartJson.Add('part_subtotal', '55.00');
-        PartJson.Add('part_quantity', '2');
-        PartJson.Add('part_description', 'BC test part');
-        PartArray.Add(PartJson);
-
-        TaskJson.Add('labor_subtotal', '150.00');
-        TaskJson.Add('labor_hours', '2');
-        TaskJson.Add('labor_complaint', 'BC test app repair');
-        TaskJson.Add('parts', PartArray);
-        TaskArray.Add(TaskJson);
-
-        ROJson.Add('vin', '1234567890');
-        ROJson.Add('date_started', FormatFleetrockDate(CalcDate('<-2D>', Today())));
-        ROJson.Add('date_finished', FormatFleetrockDate(CalcDate('<-1D>', Today())));
-        ROJson.Add('invoice_number', StrSubstNo('BCTEST-%1', Format(CurrentDateTime(), 0, '<Year4><Month,2><Day,2><Hours24,2><Minutes,2><Seconds,2>')));
-        ROJson.Add('notes', 'Created by the BC test app');
-        ROJson.Add('tasks', TaskArray);
-        ROArray.Add(ROJson);
-
-        JsonBody.Add('customer_id', FleetrockSetup.Username);
-        JsonBody.Add('vendor_id', FleetrockSetup."Vendor Username");
-        JsonBody.Add('repair_orders', ROArray);
-
-        ResponseObj := PostToFleetrock('AddRO', JsonBody);
-        ROId := JsonMgt.GetJsonValueAsText(ResponseObj, 'ro_id');
-        Assert.AreNotEqual('', ROId, 'AddRO should return the id of the created repair order.');
-    end;
-
-    /// <summary>
-    /// Moves the repair order to Invoiced as of yesterday. The paid date is removed first and the
-    /// invoiced date set in a second call, because Fleetrock stores a combined update with an
-    /// unpredictable timestamp. Dates are sent date-only and parsed by Fleetrock as US Eastern,
-    /// so yesterday's date is always safely inside the import window regardless of time zone.
-    /// </summary>
-    local procedure SetRepairOrderToInvoiced(ROId: Text)
-    begin
-        UpdateRepairOrder(ROId, 'date_invoice_paid', 'delete');
-        UpdateRepairOrder(ROId, 'date_invoiced', FormatFleetrockDate(CalcDate('<-1D>', Today())));
-    end;
-
-    /// <summary>
-    /// Removes the repair order from Fleetrock once the test is done. Fleetrock refuses to delete
-    /// an invoiced order, so the invoiced and finished dates are removed first to walk the status
-    /// back. The API rejects removing the started date, so In Progress is as far back as an order
-    /// can go -- which is enough for the delete to be accepted.
-    /// </summary>
-    local procedure DeleteRepairOrder(ROId: Text)
-    begin
-        // Fleetrock puts the paid date back when the invoiced date is set, the same way AddRO
-        // defaults both to the finished date, and it refuses to drop the invoiced date while a paid
-        // date is there. So the paid date comes off first, exactly as SetRepairOrderToInvoiced does.
-        UpdateRepairOrder(ROId, 'date_invoice_paid', 'delete');
-        UpdateRepairOrder(ROId, 'date_invoiced', 'delete');
-        UpdateRepairOrder(ROId, 'date_finished', 'delete');
-        UpdateRepairOrder(ROId, 'status', 'deleted');
-    end;
-
-    local procedure UpdateRepairOrder(ROId: Text; FieldName: Text; FieldValue: Text)
-    var
-        JsonBody, ROJson : JsonObject;
-        ROArray: JsonArray;
-    begin
-        ROJson.Add('ro_id', ROId);
-        ROJson.Add(FieldName, FieldValue);
-        ROArray.Add(ROJson);
-        JsonBody.Add('username', FleetrockSetup.Username);
-        JsonBody.Add('repair_orders', ROArray);
-        PostToFleetrock('UpdateRO', JsonBody);
-    end;
-
-    /// <summary>
-    /// Posts a JSON body to a Fleetrock API endpoint and returns the first entry of its
-    /// "response" array, failing the test if Fleetrock reports an error.
-    /// </summary>
-    local procedure PostToFleetrock(Endpoint: Text; var JsonBody: JsonObject) ResponseObj: JsonObject
-    var
-        ResponseArray: JsonArray;
-        JTkn: JsonToken;
-    begin
-        ResponseArray := RestAPIMgt.GetResponseAsJsonArray(
-            StrSubstNo('%1/API/%2?token=%3', FleetrockSetup."Integration URL", Endpoint, FleetrockMgt.CheckToGetAPIToken()),
-            'response', 'POST', JsonBody);
-        Assert.AreEqual(1, ResponseArray.Count(), StrSubstNo('%1 should return one response entry.', Endpoint));
-        ResponseArray.Get(0, JTkn);
-        ResponseObj := JTkn.AsObject();
-        Assert.AreEqual('success', JsonMgt.GetJsonValueAsText(ResponseObj, 'result'),
-            StrSubstNo('%1 should succeed: %2', Endpoint, JsonMgt.GetJsonValueAsText(ResponseObj, 'message')));
-    end;
-
-    local procedure GetRepairOrder(ROId: Text) ROObj: JsonObject
-    var
-        ROArray: JsonArray;
-        JTkn: JsonToken;
-    begin
-        ROArray := RestAPIMgt.GetResponseAsJsonArray(
-            StrSubstNo('%1/API/GetRO?username=%2&token=%3&id=%4', FleetrockSetup."Integration URL", FleetrockSetup.Username, FleetrockMgt.CheckToGetAPIToken(), ROId),
-            'repair_orders');
-        Assert.AreEqual(1, ROArray.Count(), StrSubstNo('Fleetrock should return repair order %1.', ROId));
-        ROArray.Get(0, JTkn);
-        ROObj := JTkn.AsObject();
     end;
 
     local procedure GetFleetrockCustomerNo(): Code[20]
@@ -353,32 +239,13 @@ codeunit 80853 "BAASIT Fleetrock E2E Tests"
         exit(Customer."No.");
     end;
 
-    /// <summary>
-    /// Pulls the import error logged on the staging record for the repair order, so a failed
-    /// import surfaces its cause in the test failure message.
-    /// </summary>
-    local procedure GetStagingError(ROId: Text): Text
-    var
-        RepairHeaderStaging: Record "FRI Repair Header";
-    begin
-        RepairHeaderStaging.SetRange(id, ROId);
-        if RepairHeaderStaging.FindLast() then
-            if RepairHeaderStaging."Error Message" <> '' then
-                exit(StrSubstNo(' Staging error: %1', RepairHeaderStaging."Error Message"));
-    end;
-
-    local procedure FormatFleetrockDate(D: Date): Text
-    begin
-        exit(Format(D, 0, '<Month>/<Day>/<Year4>'));
-    end;
-
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         FleetrockSetup: Record "FRI Fleetrock Setup";
         Assert: Codeunit "Library Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
-        FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
-        RestAPIMgt: Codeunit "FRI REST API Mgt.";
+        ROHelper: Codeunit "BAASIT Fleetrock RO Helper";
         TestMode: Codeunit "BAASIT Test Mode";
+        UnitVinTok: Label '1234567890', Locked = true;
 }

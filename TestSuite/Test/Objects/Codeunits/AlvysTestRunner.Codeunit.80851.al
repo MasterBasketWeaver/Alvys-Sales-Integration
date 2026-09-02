@@ -18,6 +18,9 @@ codeunit 80851 "BAASIT Alvys Test Runner"
         // codeunit "BAASIT Test Runner No Rollback", so both runners always cover the same suite.
         Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
         Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
+        // Codeunit "BAASIT Alvys Poll E2E Tests" is deliberately not here. Its two phases have a
+        // manual settlement in the Alvys web UI between them, so it cannot run unattended as part
+        // of the suite; codeunit "BAASIT E2E Test Runner" runs it a phase at a time instead.
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean

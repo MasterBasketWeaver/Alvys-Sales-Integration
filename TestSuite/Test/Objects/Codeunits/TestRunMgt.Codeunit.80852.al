@@ -46,4 +46,36 @@ codeunit 80852 "BAASIT Test Run Mgt."
         TestRun."Tests Run" := TestRun.Successful + TestRun.Failed;
         TestRun.Modify();
     end;
+
+    /// <summary>
+    /// Runs one phase of the chained end-to-end suite, through the runner that keeps its data: the
+    /// invoice and the deduction a phase leaves behind are what the next phase asserts against, so
+    /// the isolation the ordinary suite relies on would take the chain with it.
+    /// </summary>
+    procedure RunE2EPhase(Phase: Enum "BAASIT E2E Phase")
+    var
+        TestResult: Record "BAASIT Test Result";
+        TestRun: Record "BAASIT Test Run";
+        E2EContext: Codeunit "BAASIT E2E Context";
+        StartedAt: DateTime;
+    begin
+        TestResult.DeleteAll();
+        TestRun.GetSingleton();
+        StartedAt := CurrentDateTime();
+        E2EContext.SetPhase(Phase);
+
+        // A test runner cannot start inside the write transaction opened above.
+        Commit();
+
+        Codeunit.Run(Codeunit::"BAASIT E2E Test Runner");
+        E2EContext.SetPhase(Enum::"BAASIT E2E Phase"::None);
+
+        TestRun."Started At" := StartedAt;
+        TestRun."Finished At" := CurrentDateTime();
+        TestRun.Duration := TestRun."Finished At" - StartedAt;
+        TestRun.Successful := TestResult.CountByOutcome(TestResult.Outcome::Success);
+        TestRun.Failed := TestResult.CountByOutcome(TestResult.Outcome::Failure);
+        TestRun."Tests Run" := TestRun.Successful + TestRun.Failed;
+        TestRun.Modify();
+    end;
 }
