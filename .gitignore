@@ -5,3 +5,4 @@
 *.altemplates*
 Translations*
 *.app
+__pycache__/
