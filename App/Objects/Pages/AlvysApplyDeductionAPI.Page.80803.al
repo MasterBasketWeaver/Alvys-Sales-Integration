@@ -180,9 +180,12 @@ page 80803 "BAASI Alvys Apply Ded. API"
 
     trigger OnInsertRecord(BelowxRec: Boolean): Boolean
     var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+        ErrorText: Text;
     begin
-        AlvysSalesMgt.PrepareApplyDeductionEntry(Rec, DeductionIdTxt, TruckIdTxt, TruckNumberTxt, AmountDec, SettlementDateVar, DescriptionTxt);
+        AlvysSalesMgt.InsertDeduction(AlvysDeduction, DeductionIdTxt, TruckIdTxt, TruckNumberTxt, AmountDec, DescriptionTxt, ErrorText);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(Rec, AlvysDeduction, SettlementDateVar, 'POST', '');
 
         // The entry is written whichever way the call is answered: the log is the record of what
         // Alvys sent, and a call that failed is the one most worth having. Inserting here rather

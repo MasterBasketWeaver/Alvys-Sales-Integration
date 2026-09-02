@@ -136,8 +136,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         if not AlvysDeduction.Get(EntryNo) then
             exit;
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareFailedSettlementEntry(
-            AlvysEntry, AlvysDeduction, WorkDate(), ErrorText, ErrorStack, PollMethodTok, PollURLTok);
+        AlvysSalesMgt.PrepareFailedSettlementEntry(AlvysEntry, AlvysDeduction, WorkDate(), ErrorText, ErrorStack, 'GET', 'deductions/search');
         AlvysEntry.Insert(true);
         Commit();
     end;
@@ -147,22 +146,15 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     /// the payment posts under the work date of the run that found it. Only a settlement that went
     /// through is marked applied; one that did not is left for the next run to try again.
     /// </summary>
-    internal procedure ApplySettledDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction")
+    internal procedure ApplySettledDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"): Text
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
     begin
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(
-            AlvysEntry, AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number",
-            AlvysDeduction.Amount, WorkDate(), AlvysDeduction.Description, PollMethodTok, PollURLTok);
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, WorkDate(), 'GET', 'deductions/search');
         AlvysEntry.Insert(true);
 
-        if AlvysEntry."Error Message" <> '' then
-            exit;
-
-        AlvysDeduction."Settlement Applied" := true;
-        AlvysDeduction."Settlement Applied At" := CurrentDateTime();
-        AlvysDeduction.Modify(true);
+        exit(AlvysEntry."Error Message");
     end;
 
     local procedure SearchKey(DeductionId: Text): Text
@@ -179,6 +171,4 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         ScheduledRun: Boolean;
         JsonMgt: Codeunit "BAAPI Json Mgt.";
-        PollMethodTok: Label 'POLL', Locked = true;
-        PollURLTok: Label 'deductions/search', Locked = true;
 }
