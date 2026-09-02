@@ -666,10 +666,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         GenJnlLine.Validate("Bal. Account Type", GenJnlLine."Bal. Account Type"::"G/L Account");
         GenJnlLine.Validate("Bal. Account No.", AlvysSalesSetup."Bal. Account No.");
         GenJnlLine.Validate(Amount, SettlementAmount);
-        GenJnlLine.Validate("Applies-to Doc. Type", GenJnlLine."Applies-to Doc. Type"::Invoice);
-        GenJnlLine.Validate("Applies-to Doc. No.", SalesInvHeader."No.");
-        // Last, because validating the accounts above rebuilds the dimension set from their own
-        // defaults and would undo this.
+        // After the accounts, which rebuild the dimension set from their own defaults, but before
+        // the Applies-to fields: Multi-Entity Management subscribes to their validation and reads
+        // the entity off the line, so by then the line has to carry the invoice's entity rather
+        // than the batch's default, or a decentralized receivable refuses the application.
         //
         // Entity is this company's global dimension 1, and posting reads a global dimension off the
         // line's shortcut field rather than out of the dimension set. Setting the set alone leaves
@@ -678,7 +678,24 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         // some other tables do.
         GenJnlLine.Validate("Dimension Set ID", SalesInvHeader."Dimension Set ID");
         DimMgt.UpdateGlobalDimFromDimSetID(GenJnlLine."Dimension Set ID", GenJnlLine."Shortcut Dimension 1 Code", GenJnlLine."Shortcut Dimension 2 Code");
+        GenJnlLine.Validate("Applies-to Doc. Type", GenJnlLine."Applies-to Doc. Type"::Invoice);
+        GenJnlLine.Validate("Applies-to Doc. No.", SalesInvHeader."No.");
+        // Taken again here rather than trusted from above: applying to the invoice lets Multi-Entity
+        // Management add its own due to/due from lines to the batch, and one of them claims the
+        // number reserved before the validation ran.
+        GenJnlLine."Line No." := NextPaymentJournalLineNo(AlvysSalesSetup, LineNo);
         GenJnlLine.Insert(true);
+    end;
+
+    local procedure NextPaymentJournalLineNo(AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; ReservedLineNo: Integer): Integer
+    var
+        LastGenJnlLine: Record "Gen. Journal Line";
+    begin
+        LastGenJnlLine.SetRange("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
+        LastGenJnlLine.SetRange("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
+        if LastGenJnlLine.FindLast() and (LastGenJnlLine."Line No." >= ReservedLineNo) then
+            exit(LastGenJnlLine."Line No." + 10000);
+        exit(ReservedLineNo);
     end;
 
     /// <summary>
