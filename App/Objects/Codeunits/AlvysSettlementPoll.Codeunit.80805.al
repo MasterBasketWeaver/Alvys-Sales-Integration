@@ -116,6 +116,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
             if AlvysDeduction.Get(EntryNo) then
                 if ScheduledRun then begin
                     ClearLastError();
+                    Commit();
                     if not Codeunit.Run(Codeunit::"BAASI Apply Settled Deduction", AlvysDeduction) then
                         LogFailedSettlement(EntryNo, GetLastErrorText(), GetLastErrorCallStack());
                 end else

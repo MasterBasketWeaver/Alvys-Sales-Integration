@@ -434,14 +434,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         exit(DocNo);
     end;
 
-    /// <summary>
-    /// Logs a call that is not tied to a sales document. Such calls are recorded against the
-    /// blank document type, so the Document No. on the entry stays blank.
-    /// </summary>
-    local procedure InsertEntry(URL: Text; Method: Text; RequestBody: Text; ResponseText: Text; ErrorText: Text; Success: Boolean; LogResponse: Boolean)
-    begin
-        InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, Method, RequestBody, ResponseText, ErrorText, Success, LogResponse);
-    end;
+
 
     /// <summary>
     /// Fills in the parts of an inbound entry the caller cannot supply: Alvys posts the payload to
@@ -557,7 +550,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         SalesInvHeader: Record "Sales Invoice Header";
         AlvysDeduction: Record "BAASI Alvys Deduction";
     begin
-        Clear(SalesInvHeader);
         if DeductionId = '' then begin
             ErrorText := ApplyBlankDeductionErr;
             exit('');
@@ -581,6 +573,25 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             ErrorText := StrSubstNo(NoSalesInvoiceFoundErr, AlvysDeduction."Posted Document No.", DeductionId);
             exit('');
         end;
+
+        SalesInvHeader.CalcFields(Closed);
+        if SalesInvHeader.Closed then begin
+            ErrorText := StrSubstNo(SalesInvAlreadyClosedErr, SalesInvHeader."No.");
+            exit('');
+        end;
+
+        SalesInvHeader.CalcFields(Cancelled, Reversed);
+        if SalesInvHeader.Cancelled or SalesInvHeader.Reversed then begin
+            ErrorText := StrSubstNo(SalesInvCancelledOrReversedErr, SalesInvHeader."No.");
+            exit('');
+        end;
+
+        SalesInvHeader.CalcFields("Remaining Amount");
+        if AlvysDeduction.Amount > SalesInvHeader."Remaining Amount" then begin
+            ErrorText := StrSubstNo(SalesInvRemainingAmountErr, SalesInvHeader."No.", SalesInvHeader."Remaining Amount", AlvysDeduction.Amount);
+            exit('');
+        end;
+
         exit(SalesInvHeader."No.");
     end;
 
@@ -642,15 +653,15 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         GenJnlLine: Record "Gen. Journal Line";
     begin
-        InsertPaymentJournalLine(GenJnlLine, AlvysSalesSetup, DocumentNo, Amount, SettlementDate);
+        InsertPaymentJournalLine(GenJnlLine, AlvysSalesSetup, DocumentNo, Amount, SettlementDate, AlvysDeduction."Id");
         if not AlvysSalesSetup."Auto-Post Deductions" then
             exit('');
 
         // Codeunit.Run rolls its own work back when it fails, and the line written above is inside
         // that transaction, so it is committed first. Posting is the last thing this call does, so
         // the commit hands nothing else over early.
-        Commit();
         ClearLastError();
+        Commit();
         if not Codeunit.Run(Codeunit::"Gen. Jnl.-Post Batch", GenJnlLine) then
             exit(StrSubstNo(ApplyPostingFailedErr, AlvysSalesSetup."Payment Journal Template", AlvysSalesSetup."Payment Journal Batch", GetLastErrorText()));
 
@@ -678,27 +689,45 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// mandatory entity dimension the customer's own defaults do not supply, so a line dimensioned
     /// from the customer will not post at all.
     /// </summary>
-    local procedure InsertPaymentJournalLine(var GenJnlLine: Record "Gen. Journal Line"; var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; SalesInvHdrNo: Code[20]; SettlementAmount: Decimal; SettlementDate: Date)
+    local procedure InsertPaymentJournalLine(var GenJnlLine: Record "Gen. Journal Line"; var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; SalesInvHdrNo: Code[20]; SettlementAmount: Decimal; SettlementDate: Date; AlvysDeductionId: Text[50])
     var
         SalesInvHeader: Record "Sales Invoice Header";
         LastGenJnlLine: Record "Gen. Journal Line";
         RecRef: RecordRef;
-        LineNo: Integer;
+        LineNo, OldLineNo : Integer;
     begin
         SalesInvHeader.Get(SalesInvHdrNo);
 
-        LastGenJnlLine.SetRange("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
-        LastGenJnlLine.SetRange("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
-        if LastGenJnlLine.FindLast() then
-            LineNo := LastGenJnlLine."Line No." + 10000
-        else
-            LineNo := 10000;
+        GenJnlLine.Reset();
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", AlvysDeductionId);
+        if not GenJnlLine.FindFirst() then begin
+            LastGenJnlLine.SetRange("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
+            LastGenJnlLine.SetRange("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
+            if LastGenJnlLine.FindLast() then
+                LineNo := LastGenJnlLine."Line No." + 10000
+            else
+                LineNo := 10000;
 
-        GenJnlLine.Init();
-        GenJnlLine.Validate("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
-        GenJnlLine.Validate("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
-        GenJnlLine."Line No." := LineNo;
-        GenJnlLine.SetUpNewLine(LastGenJnlLine, 0, true);
+            GenJnlLine.Init();
+            GenJnlLine.Validate("Journal Template Name", AlvysSalesSetup."Payment Journal Template");
+            GenJnlLine.Validate("Journal Batch Name", AlvysSalesSetup."Payment Journal Batch");
+            GenJnlLine."Line No." := LineNo;
+            GenJnlLine.SetUpNewLine(LastGenJnlLine, 0, true);
+
+            OldLineNo := LineNo;
+            // Required due to the SetUpNewLine() reset the LineNo. to something that might not be valid
+            GenJnlLine."Line No." := NextPaymentJournalLineNo(AlvysSalesSetup, LineNo);
+            GenJnlLine.Validate("BAASI Alvys Deduction Id", AlvysDeductionId);
+            GenJnlLine.Insert(true);
+
+            // Remove second that is being incorrectly inserted in the above process
+            if GenJnlLine."Line No." <> OldLineNo then begin
+                LineNo := GenJnlLine."Line No.";
+                if GenJnlLine.Get(AlvysSalesSetup."Payment Journal Template", AlvysSalesSetup."Payment Journal Batch", OldLineNo) then
+                    GenJnlLine.Delete(true);
+                GenJnlLine.Get(AlvysSalesSetup."Payment Journal Template", AlvysSalesSetup."Payment Journal Batch", LineNo);
+            end
+        end;
         GenJnlLine.Validate("Posting Date", SettlementDate);
         GenJnlLine.Validate("Document Type", GenJnlLine."Document Type"::Payment);
         GenJnlLine.Validate("Account Type", GenJnlLine."Account Type"::Customer);
@@ -730,11 +759,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             end;
         end;
 
-        // Taken again here rather than trusted from above: applying to the invoice lets Multi-Entity
-        // Management add its own due to/due from lines to the batch, and one of them claims the
-        // number reserved before the validation ran.
-        GenJnlLine."Line No." := NextPaymentJournalLineNo(AlvysSalesSetup, LineNo);
-        GenJnlLine.Insert(true);
+        GenJnlLine.Modify(true);
     end;
 
     local procedure NextPaymentJournalLineNo(AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; ReservedLineNo: Integer): Integer
@@ -836,4 +861,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
         UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
         MissingPostedDocumentNoErr: Label 'Deduction %1 must have a Posted Document No. specified before it can be applied.', Comment = '%1 = Deduction Id';
+        SalesInvAlreadyClosedErr: Label 'Sales Invoice %1 has already been closed.', Comment = '%1 = Sales Invoice No.';
+        SalesInvCancelledOrReversedErr: Label 'Sales Invoice %1 has already been cancelled or reversed.', Comment = '%1 = Sales Invoice No.';
+        SalesInvRemainingAmountErr: Label 'Sales Invoice %1''s remaining amount of %2 is less than the deduction amount of %3.', Comment = '%1 = Sales Invoice No., %2 = Remaining Amount, %3 = Deduction Amount';
 }

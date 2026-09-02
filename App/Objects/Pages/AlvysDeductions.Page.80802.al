@@ -40,15 +40,20 @@ page 80802 "BAASI Alvys Deductions"
                     trigger OnDrillDown()
                     var
                         SalesHeader: Record "Sales Header";
+                        SalesInvHeader: Record "Sales Invoice Header";
                     begin
-                        Case Rec."Document Type" of
-                            Rec."Document Type"::"Sales Invoice":
-                                if SalesHeader.Get(Enum::"Sales Document Type"::Invoice, Rec."Document No.") then
-                                    Page.Run(Page::"Sales Invoice", SalesHeader);
-                            Rec."Document Type"::"Sales Order":
-                                if SalesHeader.Get(Enum::"Sales Document Type"::Order, Rec."Document No.") then
-                                    Page.Run(Page::"Sales Order", SalesHeader);
-                        End;
+                        if Rec."Posted Document No." <> '' then begin
+                            if SalesInvHeader.Get(Rec."Posted Document No.") then
+                                Page.Run(Page::"Posted Sales Invoice", SalesInvHeader);
+                        end else
+                            Case Rec."Document Type" of
+                                Rec."Document Type"::"Sales Invoice":
+                                    if SalesHeader.Get(Enum::"Sales Document Type"::Invoice, Rec."Document No.") then
+                                        Page.Run(Page::"Sales Invoice", SalesHeader);
+                                Rec."Document Type"::"Sales Order":
+                                    if SalesHeader.Get(Enum::"Sales Document Type"::Order, Rec."Document No.") then
+                                        Page.Run(Page::"Sales Order", SalesHeader);
+                            End;
                     end;
                 }
                 field("Posted Document No."; Rec."Posted Document No.")
@@ -57,7 +62,7 @@ page 80802 "BAASI Alvys Deductions"
                     var
                         SalesInvHeader: Record "Sales Invoice Header";
                     begin
-                        if SalesInvHeader.Get(Rec."Document No.") then
+                        if SalesInvHeader.Get(Rec."Posted Document No.") then
                             Page.Run(Page::"Posted Sales Invoice", SalesInvHeader);
                     end;
                 }
@@ -72,21 +77,44 @@ page 80802 "BAASI Alvys Deductions"
             action("Apply Settled Deduction")
             {
                 Caption = 'Apply Settled Deduction';
-                Tooltip = 'Manually create and post a journal line to apply the deduction payment to related Posted Sales Invoice.';
+                Tooltip = 'Checks if the Deduction has been paid in Alvys, and if so creates a journal line to apply the deduction payment to related Posted Sales Invoice. IF auto-post has been configured in the Alvys Sales Setup table then it will also post the newly created journal line.';
                 Image = Payment;
                 ApplicationArea = All;
 
                 trigger OnAction()
                 var
+                    AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
+                    GenJnlLine: Record "Gen. Journal Line";
                     AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
-                    ErrorText: Text;
+                    RecRef: RecordRef;
+                    ErrorText, LineAction : Text;
+                    NewLine: Boolean;
                 begin
                     Rec.TestField("Is Paid", true);
                     Rec.TestField("Settlement Applied", false);
                     Rec.TestField("Posted Document No.");
+
+                    GenJnlLine.SetRange("BAASI Alvys Deduction Id", Rec."Id");
+                    NewLine := GenJnlLine.IsEmpty();
+
                     ErrorText := AlvysSettlementPoll.ApplySettledDeduction(Rec);
                     if ErrorText <> '' then
                         Error(ErrorText);
+
+                    if not AlvysSalesSetup."Auto-Post Deductions" then begin
+                        GenJnlLine.SetRange("BAASI Alvys Deduction Id", Rec."Id");
+                        GenJnlLine.FindFirst();
+                        if NewLine then
+                            LineAction := InsertedLbl
+                        else
+                            LineAction := UpdatedLbl;
+
+                        RecRef.GetTable(GenJnlLine);
+                        if RecRef.FieldExist(70210826) then
+                            Message(MEMLineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name", RecRef.Field(70210826).Value())
+                        else
+                            Message(LineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name");
+                    end;
                 end;
             }
         }
@@ -95,4 +123,10 @@ page 80802 "BAASI Alvys Deductions"
             actionref("Apply Settled Deduction Promoted"; "Apply Settled Deduction") { }
         }
     }
+
+    var
+        MEMLineUpdatedMsg: Label '%1 line %2 in batch %3, Entity %4', Comment = '%1 = Line Action, %2 = Line No., %3 = Journal Batch Name, %4 = Entity';
+        LineUpdatedMsg: Label '%1 line %2 in batch %3', Comment = '%1 = Line Action, %2 = Line No., %3 = Journal Batch Name';
+        InsertedLbl: Label 'Inserted';
+        UpdatedLbl: Label 'Updated';
 }
