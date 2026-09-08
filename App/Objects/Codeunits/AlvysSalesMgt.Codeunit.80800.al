@@ -693,7 +693,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     var
         SalesInvHeader: Record "Sales Invoice Header";
         LastGenJnlLine: Record "Gen. Journal Line";
-        RecRef: RecordRef;
         LineNo, OldLineNo : Integer;
     begin
         SalesInvHeader.Get(SalesInvHdrNo);
@@ -749,15 +748,17 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         GenJnlLine.Validate("Applies-to Doc. Type", GenJnlLine."Applies-to Doc. Type"::Invoice);
         GenJnlLine.Validate("Applies-to Doc. No.", SalesInvHeader."No.");
 
-        // Set the BssiEntityID field so that the line ends up in the correct Entity journal batch
-        if GenJnlLine."Shortcut Dimension 1 Code" <> '' then begin
-            RecRef.GetTable(GenJnlLine);
-            // BssiEntityID field ID
-            if RecRef.FieldExist(70210826) then begin
-                RecRef.Field(70210826).Validate(GenJnlLine."Shortcut Dimension 1 Code");
-                RecRef.SetTable(GenJnlLine);
-            end;
-        end;
+        OnBeforeGenJnlLineModify(GenJnlLine);
+
+        // // Set the BssiEntityID field so that the line ends up in the correct Entity journal batch
+        // if GenJnlLine."Shortcut Dimension 1 Code" <> '' then begin
+        //     RecRef.GetTable(GenJnlLine);
+        //     // BssiEntityID field ID
+        //     if RecRef.FieldExist(70210826) then begin
+        //         RecRef.Field(70210826).Validate(GenJnlLine."Shortcut Dimension 1 Code");
+        //         RecRef.SetTable(GenJnlLine);
+        //     end;
+        // end;
 
         GenJnlLine.Modify(true);
     end;
@@ -824,6 +825,15 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             AlvysEntry.SetErrorStack(GetLastErrorCallStack());
         end;
         AlvysEntry.Insert(true);
+    end;
+
+
+
+
+
+    [BusinessEvent(false, false)]
+    local procedure OnBeforeGenJnlLineModify(var GenJnlLine: Record "Gen. Journal Line")
+    begin
     end;
 
 

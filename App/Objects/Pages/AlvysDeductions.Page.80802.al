@@ -86,9 +86,8 @@ page 80802 "BAASI Alvys Deductions"
                     AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
                     GenJnlLine: Record "Gen. Journal Line";
                     AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
-                    RecRef: RecordRef;
                     ErrorText, LineAction : Text;
-                    NewLine: Boolean;
+                    NewLine, IsHandled : Boolean;
                 begin
                     Rec.TestField("Is Paid", true);
                     Rec.TestField("Settlement Applied", false);
@@ -109,11 +108,14 @@ page 80802 "BAASI Alvys Deductions"
                         else
                             LineAction := UpdatedLbl;
 
-                        RecRef.GetTable(GenJnlLine);
-                        if RecRef.FieldExist(70210826) then
-                            Message(MEMLineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name", RecRef.Field(70210826).Value())
-                        else
+                        OnBeforeDisplaySettlementMessage(IsHandled, GenJnlLine, LineAction);
+                        if not IsHandled then
                             Message(LineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name");
+
+                        // RecRef.GetTable(GenJnlLine);
+                        // if RecRef.FieldExist(70210826) then
+                        //     Message(MEMLineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name", RecRef.Field(70210826).Value())
+                        // else
                     end;
                 end;
             }
@@ -123,6 +125,13 @@ page 80802 "BAASI Alvys Deductions"
             actionref("Apply Settled Deduction Promoted"; "Apply Settled Deduction") { }
         }
     }
+
+
+    [BusinessEvent(false, false)]
+    local procedure OnBeforeDisplaySettlementMessage(var IsHandled: Boolean; var GenJnlLine: Record "Gen. Journal Line"; LineAction: Text)
+    begin
+    end;
+
 
     var
         MEMLineUpdatedMsg: Label '%1 line %2 in batch %3, Entity %4', Comment = '%1 = Line Action, %2 = Line No., %3 = Journal Batch Name, %4 = Entity';
