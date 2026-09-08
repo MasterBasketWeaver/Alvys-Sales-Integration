@@ -1,0 +1,54 @@
+{
+  "id": "9bc72196-0cd1-ab62-adc1-cc82301bb988",
+  "name": "Alvys Sales MEM Integration",
+  "description": "Provides Multi-Entity Management (MEM) functionality to the Alvys Sales integration with Business Central.",
+  "publisher": "BryanA BC Developments Inc.",
+  "logo": "./Logo/BryanALogo.jpg",
+  "version": "27.0.1.0",
+  "runtime": "16.0",
+  "target": "Cloud",
+  "application": "28.0.0.0",
+  "platform": "28.0.0.0",
+  "resourceExposurePolicy": {
+    "allowDebugging": false,
+    "allowDownloadingSource": false,
+    "includeSourceInSymbolFile": false,
+    "applyToDevExtension": false
+  },
+  "features": [
+    "NoImplicitWith"
+  ],
+  "dependencies": [ 
+    {
+      "id": "e7e4551c-46e4-40a0-98aa-d33dc1d10bde",
+      "name": "Multi-Entity Management (NA)",
+      "publisher": "Binary Stream Software Inc.",
+      "version": "1.0.0.0"
+    },
+    {
+      "id": "9ac25096-0cd1-ab62-adc1-cc823016a988",
+      "name": "Fleetrock Integration",
+      "publisher": "BryanA BC Developments Inc.",
+      "version": "27.0.1.1"
+    },
+    {
+      "id": "9bc72196-0cd1-ab62-adc1-cc823016a988",
+      "name": "Alvys Sales Integration",
+      "publisher": "BryanA BC Developments Inc.",
+      "version": "27.0.1.0"
+    }
+  ],
+  "internalsVisibleTo": [
+    {
+      "id": "fdd85218-81ca-42d0-89af-afae1465ec50",
+      "name": "Alvys Sales Integration Tests",
+      "publisher": "BryanA BC Developments Inc."
+    }
+  ],
+  "idRanges": [
+    {
+      "from": 80850,
+      "to": 80850
+    }
+  ]
+}

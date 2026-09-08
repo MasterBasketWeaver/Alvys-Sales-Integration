@@ -111,11 +111,6 @@ page 80802 "BAASI Alvys Deductions"
                         OnBeforeDisplaySettlementMessage(IsHandled, GenJnlLine, LineAction);
                         if not IsHandled then
                             Message(LineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name");
-
-                        // RecRef.GetTable(GenJnlLine);
-                        // if RecRef.FieldExist(70210826) then
-                        //     Message(MEMLineUpdatedMsg, LineAction, GenJnlLine."Line No.", GenJnlLine."Journal Batch Name", RecRef.Field(70210826).Value())
-                        // else
                     end;
                 end;
             }
@@ -134,7 +129,7 @@ page 80802 "BAASI Alvys Deductions"
 
 
     var
-        MEMLineUpdatedMsg: Label '%1 line %2 in batch %3, Entity %4', Comment = '%1 = Line Action, %2 = Line No., %3 = Journal Batch Name, %4 = Entity';
+
         LineUpdatedMsg: Label '%1 line %2 in batch %3', Comment = '%1 = Line Action, %2 = Line No., %3 = Journal Batch Name';
         InsertedLbl: Label 'Inserted';
         UpdatedLbl: Label 'Updated';
