@@ -1,4 +1,4 @@
-codeunit 80861 "BAASIT Fail Settl Batch Commit"
+codeunit 89961 "BAASIT Fail Settl Batch Commit"
 {
     // Bound by a test to make a payment batch fail at the last point before it commits, after every
     // line in it has posted. What the deduction looked like at that moment is kept, so the test can

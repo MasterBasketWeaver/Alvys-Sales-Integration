@@ -1,4 +1,4 @@
-enum 80851 "BAASIT Test Outcome"
+enum 89951 "BAASIT Test Outcome"
 {
     Extensible = false;
     Caption = 'Test Outcome';

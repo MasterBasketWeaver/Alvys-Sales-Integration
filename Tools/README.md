@@ -29,12 +29,12 @@ path from `__file__`; `REPO` in the same module is where the AL projects are.
 
 ## Testing
 
-Publish the test app, then run `bc-run-tests.py`. It posts to the test-run API page (80852),
+Publish the test app, then run `bc-run-tests.py`. It posts to the test-run API page (89952),
 which runs the suite synchronously, and prints the summary plus per-method detail read back from
-the test-result API page (80853). `--keep-data` runs without rollback, leaving the documents in
+the test-result API page (89953). `--keep-data` runs without rollback, leaving the documents in
 BC and the repair order and deduction in Fleetrock and Alvys for inspection.
 
-**Always run the suite through this script, not the web client.** Page 80851 "Alvys Test Results"
+**Always run the suite through this script, not the web client.** Page 89951 "Alvys Test Results"
 and its **Run Tests** action still exist for interactive use, but driving it with Playwright is
 slow, needs a rendered session, and reports results only as a screenshot. Likewise, don't
 reintroduce the old Playwright drivers for the AL Test Tool (page 130401).

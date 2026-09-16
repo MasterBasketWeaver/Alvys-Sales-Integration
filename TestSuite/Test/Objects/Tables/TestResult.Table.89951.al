@@ -1,4 +1,4 @@
-table 80851 "BAASIT Test Result"
+table 89951 "BAASIT Test Result"
 {
     Caption = 'Alvys Test Result';
     DataClassification = SystemMetadata;

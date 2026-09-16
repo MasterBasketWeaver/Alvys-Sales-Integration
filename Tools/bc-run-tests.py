@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the Alvys test suite through the test-run API page (80852) and print the results.
+"""Run the Alvys test suite through the test-run API page (89952) and print the results.
 
 Usage: bc-run-tests.py [--keep-data]
 
 The run is synchronous: the POST returns once every test has finished. Per-method detail is
-then read back from the alvysTestResults entity (page 80853). No browser involved -- this is
-the way to run the suite; do not drive page 80851 in the web client.
+then read back from the alvysTestResults entity (page 89953). No browser involved -- this is
+the way to run the suite; do not drive page 89951 in the web client.
 """
 import sys
 

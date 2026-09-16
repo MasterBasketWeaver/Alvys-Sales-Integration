@@ -477,69 +477,69 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
 
-    /// <summary>
-    /// Fills in an apply-deduction entry from the payload fields the API page carries. The page
-    /// takes the six driver pay fields only, so everything else on the entry is derived here: the
-    /// document the deduction was raised against, the request body rebuilt from the fields, and the
-    /// method and URL of the endpoint the call arrived on.
-    ///
-    /// A payload that cannot be matched to a posted invoice is still logged, with the reason in the
-    /// error message. The entry table is the audit log of what Alvys sent, so losing the record of
-    /// a call that failed would be the wrong way round.
-    ///
-    /// A payload that does match is written to the configured payment journal as a customer payment
-    /// applied to the invoice, and the batch is posted when the setup asks for it.
-    ///
-    /// Every failure is answered 400, with the reason as the error text.
-    /// </summary>
-    internal procedure PrepareInboundSettlementEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; Method: Text; URL: Text)
-    var
-        AlvysDeduction: Record "BAASI Alvys Deduction";
-        ErrorText: Text;
-    begin
-        if FindOriginalDeduction(AlvysDeduction, DeductionId, ErrorText) then begin
-            ApplyPayloadToDeduction(AlvysDeduction, TruckId, TruckNumber, Amount, Description);
-            PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, SettlementDate, Method, URL);
-            exit;
-        end;
+    // /// <summary>
+    // /// Fills in an apply-deduction entry from the payload fields the API page carries. The page
+    // /// takes the six driver pay fields only, so everything else on the entry is derived here: the
+    // /// document the deduction was raised against, the request body rebuilt from the fields, and the
+    // /// method and URL of the endpoint the call arrived on.
+    // ///
+    // /// A payload that cannot be matched to a posted invoice is still logged, with the reason in the
+    // /// error message. The entry table is the audit log of what Alvys sent, so losing the record of
+    // /// a call that failed would be the wrong way round.
+    // ///
+    // /// A payload that does match is written to the configured payment journal as a customer payment
+    // /// applied to the invoice, and the batch is posted when the setup asks for it.
+    // ///
+    // /// Every failure is answered 400, with the reason as the error text.
+    // /// </summary>
+    // internal procedure PrepareInboundSettlementEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; Method: Text; URL: Text)
+    // var
+        // AlvysDeduction: Record "BAASI Alvys Deduction";
+        // ErrorText: Text;
+    // begin
+        // if FindOriginalDeduction(AlvysDeduction, DeductionId, ErrorText) then begin
+            // ApplyPayloadToDeduction(AlvysDeduction, TruckId, TruckNumber, Amount, Description);
+            // PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, SettlementDate, Method, URL);
+            // exit;
+        // end;
 
-        AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
-        AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
-        AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
-        PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
-    end;
+        // AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
+        // AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
+        // AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
+        // PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
+    // end;
 
-    /// <summary>
-    /// The settlement is for the deduction Business Central raised when the invoice was posted, so it
-    /// is matched to that record rather than logged as a new one.
-    /// </summary>
-    local procedure FindOriginalDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; DeductionId: Text; var ErrorText: Text): Boolean
-    begin
-        if DeductionId = '' then begin
-            ErrorText := ApplyBlankDeductionErr;
-            exit(false);
-        end;
-        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
-        if not AlvysDeduction.FindLast() then begin
-            ErrorText := StrSubstNo(NoDeductionFoundErr, DeductionId);
-            exit(false);
-        end;
-        AlvysDeduction.SetRange(Id);
-        exit(true);
-    end;
+    // /// <summary>
+    // /// The settlement is for the deduction Business Central raised when the invoice was posted, so it
+    // /// is matched to that record rather than logged as a new one.
+    // /// </summary>
+    // local procedure FindOriginalDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; DeductionId: Text; var ErrorText: Text): Boolean
+    // begin
+        // if DeductionId = '' then begin
+            // ErrorText := ApplyBlankDeductionErr;
+            // exit(false);
+        // end;
+        // AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        // if not AlvysDeduction.FindLast() then begin
+            // ErrorText := StrSubstNo(NoDeductionFoundErr, DeductionId);
+            // exit(false);
+        // end;
+        // AlvysDeduction.SetRange(Id);
+        // exit(true);
+    // end;
 
-    /// <summary>
-    /// Laid over the original in memory only: the checks and the logged body have to reflect what
-    /// Alvys sent, but a refused payload is committed with its entry and must not overwrite the
-    /// deduction. It is written to the record only by the Modify of a settlement that applied.
-    /// </summary>
-    local procedure ApplyPayloadToDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; TruckId: Text; TruckNumber: Text; Amount: Decimal; Description: Text)
-    begin
-        AlvysDeduction."Truck Id" := CopyStr(TruckId, 1, MaxStrLen(AlvysDeduction."Truck Id"));
-        AlvysDeduction."Truck Number" := CopyStr(TruckNumber, 1, MaxStrLen(AlvysDeduction."Truck Number"));
-        AlvysDeduction.Amount := Amount;
-        AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
-    end;
+    // /// <summary>
+    // /// Laid over the original in memory only: the checks and the logged body have to reflect what
+    // /// Alvys sent, but a refused payload is committed with its entry and must not overwrite the
+    // /// deduction. It is written to the record only by the Modify of a settlement that applied.
+    // /// </summary>
+    // local procedure ApplyPayloadToDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; TruckId: Text; TruckNumber: Text; Amount: Decimal; Description: Text)
+    // begin
+        // AlvysDeduction."Truck Id" := CopyStr(TruckId, 1, MaxStrLen(AlvysDeduction."Truck Id"));
+        // AlvysDeduction."Truck Number" := CopyStr(TruckNumber, 1, MaxStrLen(AlvysDeduction."Truck Number"));
+        // AlvysDeduction.Amount := Amount;
+        // AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
+    // end;
 
     /// <summary>
     /// The same, for a settlement Business Central polled for rather than one Alvys posted, so that

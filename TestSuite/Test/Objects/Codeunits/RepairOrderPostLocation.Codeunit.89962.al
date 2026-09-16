@@ -1,4 +1,4 @@
-codeunit 80862 "BAASIT RO Post Location"
+codeunit 89962 "BAASIT RO Post Location"
 {
     // Another app in the sandbox refuses to post a document without a location, and the Fleetrock
     // import does not assign one. The auto-post test cannot set it between the import and the

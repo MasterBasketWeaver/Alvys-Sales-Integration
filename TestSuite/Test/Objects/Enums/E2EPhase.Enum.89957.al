@@ -1,4 +1,4 @@
-enum 80857 "BAASIT E2E Phase"
+enum 89957 "BAASIT E2E Phase"
 {
     Extensible = false;
     Caption = 'Alvys E2E Phase';

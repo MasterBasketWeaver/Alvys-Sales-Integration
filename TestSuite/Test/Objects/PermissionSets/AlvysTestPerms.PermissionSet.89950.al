@@ -1,4 +1,4 @@
-permissionset 80850 "BAASIT Test Perms."
+permissionset 89950 "BAASIT Test Perms."
 {
     Caption = 'Alvys Sales Integration Test Permissions';
     Assignable = true;
@@ -14,8 +14,8 @@ permissionset 80850 "BAASIT Test Perms."
         page "BAASIT Alvys Test Results" = X,
         page "BAASIT Alvys Test Run API" = X,
         page "BAASIT Alvys Test Result API" = X,
-        page "BAASIT Alvys Entry Cleanup API" = X,
-        page "BAASIT Alvys Ded. Seed API" = X,
+        // page "BAASIT Alvys Entry Cleanup API" = X,
+        // page "BAASIT Alvys Ded. Seed API" = X,
         codeunit "BAASIT Alvys Sales Tests" = X,
         codeunit "BAASIT Fleetrock E2E Tests" = X,
         codeunit "BAASIT Fail Settl Batch Commit" = X,

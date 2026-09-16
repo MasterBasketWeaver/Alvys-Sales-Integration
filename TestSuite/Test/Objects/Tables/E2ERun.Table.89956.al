@@ -1,4 +1,4 @@
-table 80856 "BAASIT E2E Run"
+table 89956 "BAASIT E2E Run"
 {
     Caption = 'Alvys E2E Run';
     DataClassification = SystemMetadata;

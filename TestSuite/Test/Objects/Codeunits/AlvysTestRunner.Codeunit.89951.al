@@ -1,4 +1,4 @@
-codeunit 80851 "BAASIT Alvys Test Runner"
+codeunit 89951 "BAASIT Alvys Test Runner"
 {
     // Runs the Alvys test codeunits and logs the outcome of every test method to the
     // "BAASIT Test Result" table, so the whole suite can be run and read from inside Business
@@ -25,10 +25,10 @@ codeunit 80851 "BAASIT Alvys Test Runner"
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
     begin
-        // Returning false leaves the test out of the run entirely: it is not executed and
-        // OnAfterTestRun never fires for it, so it is not logged and not counted.
-        if TestMode.SkipTest(CodeunitId, FunctionName) then
-            exit(false);
+        // // Returning false leaves the test out of the run entirely: it is not executed and
+        // // OnAfterTestRun never fires for it, so it is not logged and not counted.
+        // if TestMode.SkipTest(CodeunitId, FunctionName) then
+            // exit(false);
         this.StartTime := CurrentDateTime();
         exit(true);
     end;
@@ -65,6 +65,6 @@ codeunit 80851 "BAASIT Alvys Test Runner"
     end;
 
     var
-        TestMode: Codeunit "BAASIT Test Mode";
+        // TestMode: Codeunit "BAASIT Test Mode";
         StartTime: DateTime;
 }

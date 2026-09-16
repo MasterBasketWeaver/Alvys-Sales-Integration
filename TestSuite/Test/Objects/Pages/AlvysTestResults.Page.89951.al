@@ -1,4 +1,4 @@
-page 80851 "BAASIT Alvys Test Results"
+page 89951 "BAASIT Alvys Test Results"
 {
     SourceTable = "BAASIT Test Result";
     ApplicationArea = All;

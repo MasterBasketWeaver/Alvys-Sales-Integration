@@ -1,4 +1,4 @@
-enum 80856 "BAASIT E2E Poll Mode"
+enum 89956 "BAASIT E2E Poll Mode"
 {
     Extensible = false;
     Caption = 'Alvys E2E Poll Mode';

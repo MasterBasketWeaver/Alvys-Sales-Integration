@@ -1,4 +1,4 @@
-table 80863 "BAASIT Held Job Queue Entry"
+table 89963 "BAASIT Held Job Queue Entry"
 {
     Caption = 'Held Job Queue Entry';
     DataClassification = SystemMetadata;
