@@ -36,6 +36,7 @@ page 80853 "BAASIT Alvys Test Result API"
                 field(outcome; Rec.Outcome) { }
                 field(duration; Rec.Duration) { }
                 field(errorMessage; Rec."Error Message") { }
+                field(errorCallStack; Rec."Error Call Stack") { }
                 field(startedAt; Rec."Start Time") { }
                 field(finishedAt; Rec."Finish Time") { }
             }

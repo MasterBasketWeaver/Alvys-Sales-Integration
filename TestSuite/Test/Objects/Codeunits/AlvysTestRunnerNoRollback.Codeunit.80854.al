@@ -53,6 +53,7 @@ codeunit 80854 "BAASIT Test Runner No Rollback"
         else begin
             TestResult.Outcome := TestResult.Outcome::Failure;
             TestResult."Error Message" := CopyStr(GetLastErrorText(), 1, MaxStrLen(TestResult."Error Message"));
+            TestResult."Error Call Stack" := CopyStr(GetLastErrorCallStack(), 1, MaxStrLen(TestResult."Error Call Stack"));
         end;
 
         TestResult.Insert(true);

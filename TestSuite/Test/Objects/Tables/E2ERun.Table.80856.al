@@ -26,6 +26,7 @@ table 80856 "BAASIT E2E Run"
         field(13; "Customer No."; Code[20]) { DataClassification = SystemMetadata; }
         field(14; "Invoice Remaining Amount"; Decimal) { DataClassification = SystemMetadata; }
         field(15; "Invoice Closed"; Boolean) { DataClassification = SystemMetadata; }
+        field(16; "Auto-Post Repair Orders"; Boolean) { DataClassification = SystemMetadata; }
     }
 
     keys
@@ -46,10 +47,11 @@ table 80856 "BAASIT E2E Run"
     /// Clears what a previous chain left behind, so a seed phase never inherits the deduction or
     /// the invoice of the run before it and a later phase cannot quietly assert against stale data.
     /// </summary>
-    procedure Reset(NewPollMode: Enum "BAASIT E2E Poll Mode")
+    procedure Reset(NewPollMode: Enum "BAASIT E2E Poll Mode"; NewAutoPostRepairOrders: Boolean)
     begin
         GetSingleton();
         Rec."Poll Mode" := NewPollMode;
+        Rec."Auto-Post Repair Orders" := NewAutoPostRepairOrders;
         Clear(Rec."Repair Order Id");
         Clear(Rec."Sales Invoice No.");
         Clear(Rec."Posted Invoice No.");

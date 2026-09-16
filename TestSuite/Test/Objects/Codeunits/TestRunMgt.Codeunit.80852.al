@@ -19,6 +19,7 @@ codeunit 80852 "BAASIT Test Run Mgt."
     /// </summary>
     procedure RunSuite(KeepData: Boolean)
     var
+        JobQueueHold: Codeunit "BAASIT Job Queue Hold";
         TestResult: Record "BAASIT Test Result";
         TestRun: Record "BAASIT Test Run";
         TestMode: Codeunit "BAASIT Test Mode";
@@ -29,14 +30,16 @@ codeunit 80852 "BAASIT Test Run Mgt."
         StartedAt := CurrentDateTime();
         TestMode.SetKeepData(KeepData);
 
-        // A test runner cannot start inside the write transaction opened above.
-        Commit();
+        // A test runner cannot start inside the write transaction opened above; holding the job
+        // queues commits it.
+        JobQueueHold.HoldJobQueues();
 
         if KeepData then
             Codeunit.Run(Codeunit::"BAASIT Test Runner No Rollback")
         else
             Codeunit.Run(Codeunit::"BAASIT Alvys Test Runner");
         TestMode.SetKeepData(false);
+        JobQueueHold.ResumeJobQueues();
 
         TestRun."Started At" := StartedAt;
         TestRun."Finished At" := CurrentDateTime();
@@ -54,6 +57,7 @@ codeunit 80852 "BAASIT Test Run Mgt."
     /// </summary>
     procedure RunE2EPhase(Phase: Enum "BAASIT E2E Phase")
     var
+        JobQueueHold: Codeunit "BAASIT Job Queue Hold";
         TestResult: Record "BAASIT Test Result";
         TestRun: Record "BAASIT Test Run";
         E2EContext: Codeunit "BAASIT E2E Context";
@@ -64,11 +68,16 @@ codeunit 80852 "BAASIT Test Run Mgt."
         StartedAt := CurrentDateTime();
         E2EContext.SetPhase(Phase);
 
-        // A test runner cannot start inside the write transaction opened above.
-        Commit();
+        // A test runner cannot start inside the write transaction opened above; holding the job
+        // queues commits it. They stay held from the seed phase through the settlement in Alvys,
+        // when the poll job would otherwise find the deduction first, and are resumed once the
+        // poll phase has run.
+        JobQueueHold.HoldJobQueues();
 
         Codeunit.Run(Codeunit::"BAASIT E2E Test Runner");
         E2EContext.SetPhase(Enum::"BAASIT E2E Phase"::None);
+        if Phase = Phase::Poll then
+            JobQueueHold.ResumeJobQueues();
 
         TestRun."Started At" := StartedAt;
         TestRun."Finished At" := CurrentDateTime();

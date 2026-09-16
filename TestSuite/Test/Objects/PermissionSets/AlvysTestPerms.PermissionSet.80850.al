@@ -4,11 +4,13 @@ permissionset 80850 "BAASIT Test Perms."
     Assignable = true;
     Permissions = tabledata "BAASIT Test Result" = RIMD,
         tabledata "BAASIT Test Run" = RIMD,
+        tabledata "BAASIT Held Job Queue Entry" = RIMD,
         tabledata "BAASI Alvys Sales Entry" = RD,
         tabledata "BAASI Alvys Deduction" = RID,
         tabledata "Sales Invoice Header" = R,
         table "BAASIT Test Result" = X,
         table "BAASIT Test Run" = X,
+        table "BAASIT Held Job Queue Entry" = X,
         page "BAASIT Alvys Test Results" = X,
         page "BAASIT Alvys Test Run API" = X,
         page "BAASIT Alvys Test Result API" = X,
@@ -21,5 +23,6 @@ permissionset 80850 "BAASIT Test Perms."
         codeunit "BAASIT Alvys Test Runner" = X,
         codeunit "BAASIT Test Runner No Rollback" = X,
         codeunit "BAASIT Test Mode" = X,
-        codeunit "BAASIT Test Run Mgt." = X;
+        codeunit "BAASIT Test Run Mgt." = X,
+        codeunit "BAASIT Job Queue Hold" = X;
 }

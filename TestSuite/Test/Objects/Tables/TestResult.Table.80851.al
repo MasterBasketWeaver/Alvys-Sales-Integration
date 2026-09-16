@@ -58,6 +58,11 @@ table 80851 "BAASIT Test Result"
             Editable = false;
             Tooltip = 'The error the test failed with, as returned by GetLastErrorText.';
         }
+        field(10; "Error Call Stack"; Text[2048])
+        {
+            DataClassification = SystemMetadata;
+            Editable = false;
+        }
     }
 
     keys

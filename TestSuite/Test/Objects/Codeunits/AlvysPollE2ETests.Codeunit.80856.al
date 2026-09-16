@@ -34,14 +34,14 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
         AlvysDeduction: Record "BAASI Alvys Deduction";
         E2ERun: Record "BAASIT E2E Run";
         JobQueueEntry: Record "Job Queue Entry";
-        SalesHeader: Record "Sales Header";
         SalesInvHeader: Record "Sales Invoice Header";
-        SalesLine: Record "Sales Line";
         GetRepairOrders: Codeunit "FRI Get Repair Orders";
+        ROPostLocation: Codeunit "BAASIT RO Post Location";
         ROObj, ResponseObj : JsonObject;
         ROId: Text;
         InvoiceNo: Code[20];
         ThreeDays: Duration;
+        OriginalAutoPost: Boolean;
     begin
         // [SCENARIO] A repair order invoiced in Fleetrock is imported, posted, and reaches Alvys as
         // an unpaid truck deduction that the settlement poll will later be able to find.
@@ -55,39 +55,27 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
         ROObj := ROHelper.GetRepairOrder(ROId);
         Assert.AreEqual('Invoiced', JsonMgt.GetJsonValueAsText(ROObj, 'status'), 'The repair order should be Invoiced in Fleetrock after the update.');
 
-        // [WHEN] The invoiced import job runs over a window that covers the invoiced date
+        // [WHEN] The invoiced import job runs over a window that covers the invoiced date, with
+        // auto-posting set the way this chain was seeded. Nothing here rolls back, so the company's
+        // own setting is put back straight after the import, the only step that reads it.
+        E2ERun.GetSingleton();
         JobQueueEntry.Init();
         JobQueueEntry."Parameter String" := 'invoiced';
         ThreeDays := 3 * 24 * 60 * 60 * 1000;
         GetRepairOrders.SetStartDateTime(CurrentDateTime() - ThreeDays);
+        OriginalAutoPost := SetAutoPostRepairOrders(E2ERun."Auto-Post Repair Orders");
+        if E2ERun."Auto-Post Repair Orders" then
+            BindSubscription(ROPostLocation);
         GetRepairOrders.Run(JobQueueEntry);
-
-        // [THEN] A sales invoice was created for the repair order
-        SalesHeader.SetRange("Document Type", SalesHeader."Document Type"::Invoice);
-        SalesHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
-        Assert.IsTrue(SalesHeader.FindFirst(), StrSubstNo('A sales invoice should have been created for repair order %1.%2', ROId, ROHelper.GetStagingError(ROId)));
-        InvoiceNo := SalesHeader."No.";
-
-        // [GIVEN] The sandbox's TEST location on the header and lines: another app in the
-        // environment requires a location to post, and the integration does not assign one. The
-        // location is assigned without validation, because validating it rebuilds the dimension
-        // sets from default dimensions and would wipe the asset dimension the integration placed
-        // on the document -- which is the truck the deduction is raised for.
-        SalesHeader."Location Code" := LocationTok;
-        SalesHeader.Modify(true);
-        SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
-        SalesLine.SetRange("Document No.", InvoiceNo);
-        SalesLine.SetRange(Type, SalesLine.Type::"G/L Account");
-        if SalesLine.FindSet(true) then
-            repeat
-                SalesLine."Location Code" := LocationTok;
-                SalesLine.Modify(true);
-            until SalesLine.Next() = 0;
-
-        // [WHEN] The invoice is posted. The import left a write transaction open and posting
-        // cannot start inside one, so it is committed first.
+        if E2ERun."Auto-Post Repair Orders" then
+            UnbindSubscription(ROPostLocation);
+        SetAutoPostRepairOrders(OriginalAutoPost);
         Commit();
-        Assert.IsTrue(Codeunit.Run(Codeunit::"Sales-Post", SalesHeader), StrSubstNo('Posting the invoice should succeed: %1', GetLastErrorText()));
+
+        if E2ERun."Auto-Post Repair Orders" then
+            InvoiceNo := AutoPostedInvoiceNo(ROId)
+        else
+            InvoiceNo := PostImportedInvoice(ROId);
 
         // [THEN] The posted invoice carries the repair order and its total
         SalesInvHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
@@ -167,8 +155,14 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
             E2ERun."Poll Mode"::Manual:
                 AlvysSettlementPoll.PollSettledDeductions();
             E2ERun."Poll Mode"::"Job Queue":
-                Assert.IsTrue(Codeunit.Run(Codeunit::"BAASI Alvys Settlement Poll"),
-                    StrSubstNo('A scheduled poll should not raise: %1', GetLastErrorText()));
+                begin
+                    // Reading the deduction from Alvys above logged the call, and Codeunit.Run
+                    // cannot start inside that write transaction. The job queue starts the poll in
+                    // a fresh session, so nothing is lost by committing here.
+                    Commit();
+                    Assert.IsTrue(Codeunit.Run(Codeunit::"BAASI Alvys Settlement Poll"),
+                        StrSubstNo('A scheduled poll should not raise: %1', GetLastErrorText()));
+                end;
         end;
 
         // [THEN] The poll noticed Alvys had settled it, and applied it exactly once
@@ -252,6 +246,74 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
     end;
 
     /// <summary>
+    /// The import left the invoice unposted. Posts it by hand, the way a user would, and hands back
+    /// its number.
+    /// </summary>
+    local procedure PostImportedInvoice(ROId: Text) InvoiceNo: Code[20]
+    var
+        SalesHeader: Record "Sales Header";
+        SalesLine: Record "Sales Line";
+    begin
+        // [THEN] A sales invoice was created for the repair order
+        SalesHeader.SetRange("Document Type", SalesHeader."Document Type"::Invoice);
+        SalesHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        Assert.IsTrue(SalesHeader.FindFirst(), StrSubstNo('A sales invoice should have been created for repair order %1.%2', ROId, ROHelper.GetStagingError(ROId)));
+        InvoiceNo := SalesHeader."No.";
+
+        // [GIVEN] The sandbox's TEST location on the header and lines: another app in the
+        // environment requires a location to post, and the integration does not assign one. The
+        // location is assigned without validation, because validating it rebuilds the dimension
+        // sets from default dimensions and would wipe the asset dimension the integration placed
+        // on the document -- which is the truck the deduction is raised for.
+        SalesHeader."Location Code" := LocationTok;
+        SalesHeader.Modify(true);
+        SalesLine.SetRange("Document Type", SalesLine."Document Type"::Invoice);
+        SalesLine.SetRange("Document No.", InvoiceNo);
+        SalesLine.SetRange(Type, SalesLine.Type::"G/L Account");
+        if SalesLine.FindSet(true) then
+            repeat
+                SalesLine."Location Code" := LocationTok;
+                SalesLine.Modify(true);
+            until SalesLine.Next() = 0;
+
+        // [WHEN] The invoice is posted. The import left a write transaction open and posting
+        // cannot start inside one, so it is committed first.
+        Commit();
+        Assert.IsTrue(Codeunit.Run(Codeunit::"Sales-Post", SalesHeader), StrSubstNo('Posting the invoice should succeed: %1', GetLastErrorText()));
+    end;
+
+    /// <summary>
+    /// The import posted the invoice itself. Checks nothing unposted was left behind and hands back
+    /// the number the invoice had before posting, which is the one the deduction records.
+    /// </summary>
+    local procedure AutoPostedInvoiceNo(ROId: Text): Code[20]
+    var
+        SalesHeader: Record "Sales Header";
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        SalesHeader.SetRange("Document Type", SalesHeader."Document Type"::Invoice);
+        SalesHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        Assert.IsTrue(SalesHeader.IsEmpty(), StrSubstNo('The import should have posted the invoice for repair order %1.%2', ROId, ROHelper.GetStagingError(ROId)));
+        SalesInvHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        Assert.IsTrue(SalesInvHeader.FindFirst(), StrSubstNo('A posted sales invoice should exist for repair order %1.%2', ROId, ROHelper.GetStagingError(ROId)));
+        exit(SalesInvHeader."Pre-Assigned No.");
+    end;
+
+    /// <summary>
+    /// Sets auto-posting of imported repair orders and returns what it was, so the caller can put
+    /// the company's own setting back.
+    /// </summary>
+    local procedure SetAutoPostRepairOrders(AutoPost: Boolean) WasAutoPost: Boolean
+    begin
+        FleetrockSetup.Get();
+        WasAutoPost := FleetrockSetup."Auto-post Repair Orders";
+        if WasAutoPost = AutoPost then
+            exit;
+        FleetrockSetup."Auto-post Repair Orders" := AutoPost;
+        FleetrockSetup.Modify();
+    end;
+
+    /// <summary>
     /// Both integrations have to be configured in the company the chain runs in, rather than seeded
     /// here: the run drives the real Fleetrock tenant and the real Alvys API, and the two have to
     /// agree on the dimension that carries the truck or the posting will not raise a deduction.
@@ -274,7 +336,6 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
         FleetrockSetup.TestField("API Key");
         FleetrockSetup.TestField("Vendor Username");
         FleetrockSetup.TestField("Asset Dimension Code", AlvysSetup."Tractor Code Dimension");
-        FleetrockSetup.TestField("Auto-post Repair Orders", false);
         FleetrockSetup.TestField("Use API Token", false);
 
         Clear(AlvysSalesMgt);

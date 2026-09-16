@@ -36,6 +36,7 @@ page 80856 "BAASIT Alvys E2E API"
             {
                 field(id; Rec.SystemId) { }
                 field(pollMode; Rec."Poll Mode") { }
+                field(autoPostRepairOrders; Rec."Auto-Post Repair Orders") { }
                 field(repairOrderId; Rec."Repair Order Id") { }
                 field(salesInvoiceNo; Rec."Sales Invoice No.") { }
                 field(postedInvoiceNo; Rec."Posted Invoice No.") { }
@@ -59,7 +60,18 @@ page 80856 "BAASIT Alvys E2E API"
     [ServiceEnabled]
     procedure seedManual(var ActionContext: WebServiceActionContext)
     begin
-        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::Manual, true);
+        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::Manual, false, true);
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
+    /// Phase one with Fleetrock auto-posting the imported invoice, for a chain that will be finished
+    /// by a manual poll.
+    /// </summary>
+    [ServiceEnabled]
+    procedure seedManualAutoPost(var ActionContext: WebServiceActionContext)
+    begin
+        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::Manual, true, true);
         SetActionContext(ActionContext);
     end;
 
@@ -69,7 +81,18 @@ page 80856 "BAASIT Alvys E2E API"
     [ServiceEnabled]
     procedure seedJobQueue(var ActionContext: WebServiceActionContext)
     begin
-        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::"Job Queue", true);
+        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::"Job Queue", false, true);
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
+    /// Phase one with Fleetrock auto-posting the imported invoice, for a chain that will be finished
+    /// by a job queue poll.
+    /// </summary>
+    [ServiceEnabled]
+    procedure seedJobQueueAutoPost(var ActionContext: WebServiceActionContext)
+    begin
+        RunPhase(Enum::"BAASIT E2E Phase"::Seed, Enum::"BAASIT E2E Poll Mode"::"Job Queue", true, true);
         SetActionContext(ActionContext);
     end;
 
@@ -80,7 +103,7 @@ page 80856 "BAASIT Alvys E2E API"
     [ServiceEnabled]
     procedure poll(var ActionContext: WebServiceActionContext)
     begin
-        RunPhase(Enum::"BAASIT E2E Phase"::Poll, Rec."Poll Mode", false);
+        RunPhase(Enum::"BAASIT E2E Phase"::Poll, Rec."Poll Mode", Rec."Auto-Post Repair Orders", false);
         SetActionContext(ActionContext);
     end;
 
@@ -103,7 +126,7 @@ page 80856 "BAASIT Alvys E2E API"
         GenJnlLine: Record "Gen. Journal Line";
     begin
         E2ERun.GetSingleton();
-        E2ERun.Reset(E2ERun."Poll Mode");
+        E2ERun.Reset(E2ERun."Poll Mode", E2ERun."Auto-Post Repair Orders");
 
         AlvysSalesSetup.Get();
         if (AlvysSalesSetup."Payment Journal Template" <> '') and (AlvysSalesSetup."Payment Journal Batch" <> '') then begin
@@ -117,14 +140,28 @@ page 80856 "BAASIT Alvys E2E API"
         SetActionContext(ActionContext);
     end;
 
-    local procedure RunPhase(Phase: Enum "BAASIT E2E Phase"; PollMode: Enum "BAASIT E2E Poll Mode"; ResetRun: Boolean)
+    /// <summary>
+    /// Resumes the job queues a chain held, for a chain that stopped before its poll phase could
+    /// resume them.
+    /// </summary>
+    [ServiceEnabled]
+    procedure resumeJobQueues(var ActionContext: WebServiceActionContext)
+    var
+        JobQueueHold: Codeunit "BAASIT Job Queue Hold";
+    begin
+        JobQueueHold.ResumeJobQueues();
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    local procedure RunPhase(Phase: Enum "BAASIT E2E Phase"; PollMode: Enum "BAASIT E2E Poll Mode"; AutoPostRepairOrders: Boolean; ResetRun: Boolean)
     var
         E2ERun: Record "BAASIT E2E Run";
         TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
     begin
         E2ERun.GetSingleton();
         if ResetRun then
-            E2ERun.Reset(PollMode);
+            E2ERun.Reset(PollMode, AutoPostRepairOrders);
         TestRunMgt.RunE2EPhase(Phase);
         Rec.GetSingleton();
     end;

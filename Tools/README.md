@@ -12,7 +12,7 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | `bc-symbols.py [project-path]` | Download `.app` symbols into the project's `.alpackages`. Defaults to the App project. |
 | `bc_auth.py` | OAuth device-code flow with a persistent token cache. `get_access_token()` is imported by the two scripts above. |
 | `project_paths.py` | Resolves `TOOLS`, `REPO` and `PROJECT_ROOT`. Use it for anything kept out of git. |
-| `alvys-e2e.py [manual\|jobqueue\|both\|resume\|reset]` | Drives the chained Fleetrock -> BC -> Alvys -> poll test, settling the deduction in the Alvys UI between phases. |
+| `alvys-e2e.py [manual\|jobqueue\|both\|resume\|reset] [--auto-post off\|on\|both]` | Drives the chained Fleetrock -> BC -> Alvys -> poll test, settling the deduction in the Alvys UI between phases. With no arguments it runs two chains: Manual poll with Fleetrock auto-post off, and Job Queue poll with it on. |
 | `alvys_api.py` | Alvys public API client (token, deduction reads, `wait_until_paid`). |
 | `alvys_ui.py` | Playwright helpers for the Alvys web UI, including `settle_truck_deductions`. |
 | `bc_session.py` | Shared Playwright helpers for the BC web client; re-authenticates automatically when the saved session expires. |

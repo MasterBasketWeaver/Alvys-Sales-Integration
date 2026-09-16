@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Drive the chained Alvys end-to-end test: Fleetrock -> Business Central -> Alvys -> back again.
 
-    alvys-e2e.py [manual|jobqueue|both]      (default: both)
+    alvys-e2e.py [manual|jobqueue|both] [--auto-post off|on|both]
+                                             (default: both, paired -- see below)
     alvys-e2e.py resume                      poll only, for a chain already settled in Alvys
     alvys-e2e.py reset                       clear the run and empty the Alvys payment journal
 
@@ -10,9 +11,10 @@ API -- deductions/{id} serves GET and DELETE only, and the token carries no dedu
 -- so the settlement has to happen in the Alvys web UI, and an AL test cannot stop and wait for
 that. So this script runs it in three steps:
 
-    1. seed   POST alvysE2eRuns/Microsoft.NAV.seed{Manual,JobQueue}
-              Creates a repair order in Fleetrock, imports it, posts it, and checks the deduction
-              reached Alvys unpaid. What it produced is read back off the entity.
+    1. seed   POST alvysE2eRuns/Microsoft.NAV.seed{Manual,JobQueue}[AutoPost]
+              Creates a repair order in Fleetrock, imports it, posts it -- by hand, or by the import
+              itself with Fleetrock's Auto-post Repair Orders turned on for the import -- and checks
+              the deduction reached Alvys unpaid. What it produced is read back off the entity.
     2. settle Approves that truck's deductions into a draft statement in the Alvys UI and
               generates it, which is what turns IsPaid over. Then waits for Alvys to catch up.
     3. poll   POST alvysE2eRuns/Microsoft.NAV.poll
@@ -20,8 +22,10 @@ that. So this script runs it in three steps:
               Manual, through the codeunit's OnRun for Job Queue -- and checks the settlement paid
               off the very invoice the chain started from.
 
-Both poll modes are run by default, one chain each: a settled deduction can only be applied once,
-so a single chain cannot exercise both.
+A settled deduction can only be applied once, so every combination needs its own chain. The poll
+mode only matters to the poll phase and auto-posting only to the seed phase, so by default two
+chains cover both of each: Manual with auto-post off, and Job Queue with auto-post on. Naming a
+poll mode or --auto-post explicitly runs every combination of what was named instead.
 
 Nothing rolls back. The invoice, the deduction and the repair order stay in all three systems.
 """
@@ -43,13 +47,23 @@ BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2
 # settlement is run from the owner operator's row, so the two are looked up together.
 OWNER_OPERATOR = "Adam Test"
 
+ACTIVE_BC = None
+
 MODES = {"manual": ("seedManual", "Manual"), "jobqueue": ("seedJobQueue", "Job Queue")}
+AUTO_POST = {"off": False, "on": True}
 
 
 def die(msg, resp=None):
+    global ACTIVE_BC
     print(f"\nERROR: {msg}")
     if resp is not None:
         print(f"  HTTP {resp.status_code}: {resp.text[:1500]}")
+    if ACTIVE_BC is not None:
+        # The seed phase holds the Fleetrock import and settlement poll job queues until the poll
+        # phase resumes them; a chain that stops before then would leave them held.
+        ACTIVE_BC, bc = None, ACTIVE_BC
+        requests.post(f"{API}/companies({bc.company})/alvysE2eRuns({bc.run_id})/Microsoft.NAV.resumeJobQueues",
+                      headers=bc.h, json={}, timeout=300)
     sys.exit(1)
 
 
@@ -64,6 +78,8 @@ class BC:
             die(f"company '{COMPANY}' not found in {ENV}")
         self.company = companies[0]["id"]
         self.run_id = self._run_id()
+        global ACTIVE_BC
+        ACTIVE_BC = self
 
     def _run_id(self):
         r = requests.get(f"{API}/companies({self.company})/alvysE2eRuns", headers=self.h, timeout=120)
@@ -106,14 +122,21 @@ def report(bc, phase):
         print(f"    [{mark}] {res.get('methodName')}")
         if res.get("errorMessage"):
             print(f"           {res['errorMessage'][:900]}")
+        if res.get("errorCallStack"):
+            print("           call stack:")
+            for frame in res["errorCallStack"].splitlines():
+                print(f"             {frame}")
     if not ok:
         die(f"{phase} phase failed")
     return ok
 
 
-def run_chain(bc, mode):
-    seed_action, label = MODES[mode]
-    print(f"\n{'=' * 72}\n{label} poll\n{'=' * 72}")
+def run_chain(bc, mode, auto_post):
+    seed_action, poll_label = MODES[mode]
+    if auto_post:
+        seed_action += "AutoPost"
+    label = f"{poll_label} poll, auto-post {'on' if auto_post else 'off'}"
+    print(f"\n{'=' * 72}\n{label}\n{'=' * 72}")
 
     # Every chain starts from a clean payment journal: a previous chain that failed after applying
     # its settlement leaves a line behind, and posting the batch would post that too.
@@ -140,13 +163,13 @@ def run_chain(bc, mode):
         die(f"Alvys did not mark deduction {deduction_id} paid in time")
     print("      deduction is settled in Alvys")
 
-    print(f"[3/3] Polling the settlement back into Business Central ({label})")
+    print(f"[3/3] Polling the settlement back into Business Central ({poll_label})")
     bc.action("poll")
     report(bc, "poll")
     run = bc.run()
     print(f"      invoice {run.get('postedInvoiceNo')}: remaining {run.get('invoiceRemainingAmount')}, "
           f"closed={run.get('invoiceClosed')}")
-    return run
+    return label, run
 
 
 def resume(bc):
@@ -160,7 +183,8 @@ def resume(bc):
     print(f"Resuming chain: deduction {deduction_id}, invoice {run.get('postedInvoiceNo')}")
     if not alvys_api.is_paid(deduction_id):
         die(f"deduction {deduction_id} is still not settled in Alvys")
-    label = "Job Queue" if run.get("pollMode") in ("Job Queue", "Job_Queue", 1) else "Manual"
+    label = "Job Queue" if run.get("pollMode") in ("Job Queue", "Job_Queue", "Job_x0020_Queue", 1) else "Manual"
+    label += f" poll, auto-post {'on' if run.get('autoPostRepairOrders') else 'off'}"
     print(f"[3/3] Polling the settlement back into Business Central ({label})")
     bc.action("poll")
     report(bc, "poll")
@@ -170,34 +194,48 @@ def resume(bc):
     return [(label, run)]
 
 
+def print_summary(finished):
+    print(f"\n{'=' * 72}\nSummary\n{'=' * 72}")
+    for label, run in finished:
+        print(f"  {label:32} invoice {run.get('postedInvoiceNo'):>14}  "
+              f"remaining {str(run.get('invoiceRemainingAmount')):>6}  closed={run.get('invoiceClosed')}")
+
+
+def chains(which, auto_post):
+    if which == "both" and auto_post is None:
+        return [("manual", False), ("jobqueue", True)]
+    modes = list(MODES) if which == "both" else [which]
+    if auto_post in (None, "both"):
+        settings = list(AUTO_POST.values())
+    else:
+        settings = [AUTO_POST[auto_post]]
+    return [(m, a) for m in modes for a in settings]
+
+
 def main():
-    which = (sys.argv[1] if len(sys.argv) > 1 else "both").lower()
+    args = [a.lower() for a in sys.argv[1:]]
+    auto_post = None
+    if "--auto-post" in args:
+        i = args.index("--auto-post")
+        if i + 1 >= len(args) or args[i + 1] not in ("off", "on", "both"):
+            die("--auto-post takes off, on or both")
+        auto_post = args[i + 1]
+        del args[i:i + 2]
+    which = args[0] if args else "both"
     if which == "reset":
         BC().action("resetChain")
         print("Run cleared and the Alvys payment journal emptied.")
         return
     if which == "resume":
         bc = BC()
-        finished = resume(bc)
-        print(f"\n{'=' * 72}\nSummary\n{'=' * 72}")
-        for label, run in finished:
-            print(f"  {label:10} invoice {run.get('postedInvoiceNo'):>14}  "
-                  f"remaining {str(run.get('invoiceRemainingAmount')):>6}  closed={run.get('invoiceClosed')}")
+        print_summary(resume(bc))
         return
-    modes = list(MODES) if which == "both" else [which]
-    for m in modes:
-        if m not in MODES:
-            die(f"unknown mode '{m}'; use manual, jobqueue or both")
+    if which != "both" and which not in MODES:
+        die(f"unknown mode '{which}'; use manual, jobqueue or both")
 
     bc = BC()
-    finished = []
-    for m in modes:
-        finished.append((MODES[m][1], run_chain(bc, m)))
-
-    print(f"\n{'=' * 72}\nSummary\n{'=' * 72}")
-    for label, run in finished:
-        print(f"  {label:10} invoice {run.get('postedInvoiceNo'):>14}  "
-              f"remaining {str(run.get('invoiceRemainingAmount')):>6}  closed={run.get('invoiceClosed')}")
+    finished = [run_chain(bc, m, a) for m, a in chains(which, auto_post)]
+    print_summary(finished)
     print("\nAll chains completed.")
 
 
