@@ -72,11 +72,17 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         ItemObj, ResponseObj : JsonObject;
         ItemsArray: JsonArray;
         JsonTkn: JsonToken;
-        DeductionId: Text;
+        DeductionId, ErrorText : Text;
         PageNo, Read, Total : Integer;
     begin
         repeat
-            ResponseObj := AlvysSalesMgt.SearchDeductions(EarliestDate, LatestDate, true, PageNo, SearchPageSize());
+            if not AlvysSalesMgt.SearchDeductions(EarliestDate, LatestDate, true, PageNo, SearchPageSize(), ResponseObj, ErrorText) then begin
+                // The error below rolls the logged entry back with it; a scheduled run has nobody
+                // watching, so keep the record of why the poll stopped.
+                if ScheduledRun then
+                    Commit();
+                Error(ErrorText);
+            end;
             if not ResponseObj.Get('Items', JsonTkn) then
                 exit;
             ItemsArray := JsonTkn.AsArray();

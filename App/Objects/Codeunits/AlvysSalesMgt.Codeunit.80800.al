@@ -272,7 +272,22 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// </summary>
     procedure SearchDeductions(StartDate: Date; EndDate: Date; IncludePaid: Boolean; PageNo: Integer; PageSize: Integer): JsonObject
     var
+        ResponseObj: JsonObject;
+        ErrorText: Text;
+    begin
+        if not SearchDeductions(StartDate, EndDate, IncludePaid, PageNo, PageSize, ResponseObj, ErrorText) then
+            Error(ErrorText);
+        exit(ResponseObj);
+    end;
+
+    /// <summary>
+    /// The search runs on every poll, so only a failed call is logged. A failure returns false with
+    /// the reason in ErrorText, leaving the caller to commit the logged entry before raising.
+    /// </summary>
+    procedure SearchDeductions(StartDate: Date; EndDate: Date; IncludePaid: Boolean; PageNo: Integer; PageSize: Integer; var ResponseObj: JsonObject; var ErrorText: Text): Boolean
+    var
         DateRangeObj, JsonBody : JsonObject;
+        URL, RequestBody, ResponseText : Text;
     begin
         GetAndCheckSetup();
         if StartDate = 0D then
@@ -284,7 +299,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         JsonBody.Add('PageSize', PageSize);
         JsonBody.Add('IncludePaid', IncludePaid);
         JsonBody.Add('DateRange', DateRangeObj);
-        exit(SendAPIRequest('POST', AlvysSetup."Integration URL" + 'deductions/search', 'application/json', JsonBody));
+        URL := AlvysSetup."Integration URL" + 'deductions/search';
+        if SendAndParse('POST', URL, 'application/json', JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText) then
+            exit(true);
+        InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, 'POST', RequestBody, ResponseText, ErrorText, false, true);
+        exit(false);
     end;
 
     /// <summary>
@@ -473,22 +492,53 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     ///
     /// Every failure is answered 400, with the reason as the error text.
     /// </summary>
-    internal procedure InsertDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; Description: Text; var ErrorText: Text)
+    internal procedure PrepareInboundSettlementEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; Method: Text; URL: Text)
     var
-        EntryNo: Integer;
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        ErrorText: Text;
     begin
-        AlvysDeduction.Reset();
-        AlvysDeduction.LockTable();
-        if AlvysDeduction.FindLast() then
-            EntryNo := AlvysDeduction."Entry No.";
-        AlvysDeduction."Entry No." := EntryNo + 1;
-        AlvysDeduction.Id := DeductionId;
-        AlvysDeduction."Truck Id" := TruckId;
-        AlvysDeduction."Truck Number" := TruckNumber;
+        if FindOriginalDeduction(AlvysDeduction, DeductionId, ErrorText) then begin
+            ApplyPayloadToDeduction(AlvysDeduction, TruckId, TruckNumber, Amount, Description);
+            PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, SettlementDate, Method, URL);
+            exit;
+        end;
+
+        AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
+        AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
+        AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
+        PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description));
+    end;
+
+    /// <summary>
+    /// The settlement is for the deduction Business Central raised when the invoice was posted, so it
+    /// is matched to that record rather than logged as a new one.
+    /// </summary>
+    local procedure FindOriginalDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; DeductionId: Text; var ErrorText: Text): Boolean
+    begin
+        if DeductionId = '' then begin
+            ErrorText := ApplyBlankDeductionErr;
+            exit(false);
+        end;
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        if not AlvysDeduction.FindLast() then begin
+            ErrorText := StrSubstNo(NoDeductionFoundErr, DeductionId);
+            exit(false);
+        end;
+        AlvysDeduction.SetRange(Id);
+        exit(true);
+    end;
+
+    /// <summary>
+    /// Laid over the original in memory only: the checks and the logged body have to reflect what
+    /// Alvys sent, but a refused payload is committed with its entry and must not overwrite the
+    /// deduction. It is written to the record only by the Modify of a settlement that applied.
+    /// </summary>
+    local procedure ApplyPayloadToDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; TruckId: Text; TruckNumber: Text; Amount: Decimal; Description: Text)
+    begin
+        AlvysDeduction."Truck Id" := CopyStr(TruckId, 1, MaxStrLen(AlvysDeduction."Truck Id"));
+        AlvysDeduction."Truck Number" := CopyStr(TruckNumber, 1, MaxStrLen(AlvysDeduction."Truck Number"));
         AlvysDeduction.Amount := Amount;
-        AlvysDeduction.Description := Description;
-        AlvysDeduction."Document No." := ApplyDeductionDocumentNo(DeductionId, ErrorText);
-        AlvysDeduction.Insert(true);
+        AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
     end;
 
     /// <summary>
@@ -654,6 +704,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         GenJnlLine: Record "Gen. Journal Line";
     begin
         InsertPaymentJournalLine(GenJnlLine, AlvysSalesSetup, DocumentNo, Amount, SettlementDate, AlvysDeduction."Id");
+        AlvysDeduction.Validate("Settlement Applied", true);
+        AlvysDeduction.Validate("Settlement Applied At", CurrentDateTime());
+        AlvysDeduction.Modify(true);
         if not AlvysSalesSetup."Auto-Post Deductions" then
             exit('');
 
@@ -664,13 +717,20 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         Commit();
         if not Codeunit.Run(Codeunit::"Gen. Jnl.-Post Batch", GenJnlLine) then
             exit(StrSubstNo(ApplyPostingFailedErr, AlvysSalesSetup."Payment Journal Template", AlvysSalesSetup."Payment Journal Batch", GetLastErrorText()));
-
-        // only mark the deduction as settled if the posting succeeded
-        AlvysDeduction.Validate("Settlement Applied", true);
-        AlvysDeduction.Validate("Settlement Applied At", CurrentDateTime());
-        AlvysDeduction.Modify(true);
-
         exit('');
+    end;
+
+    internal procedure MarkSettlementPosted(DeductionId: Text)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        if AlvysDeduction.FindSet(true) then
+            repeat
+                AlvysDeduction.Validate("Settlement Posted", true);
+                AlvysDeduction.Validate("Posted DateTime", CurrentDateTime());
+                AlvysDeduction.Modify(true);
+            until AlvysDeduction.Next() = 0;
     end;
 
     /// <summary>

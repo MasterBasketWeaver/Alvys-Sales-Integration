@@ -162,6 +162,14 @@ codeunit 80803 "BAASI Subscribers"
 
 
 
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"Gen. Jnl.-Post Line", OnAfterPostGenJnlLine, '', false, false)]
+    local procedure GenJnlPostLineOnAfterPostGenJnlLine(var GenJournalLine: Record "Gen. Journal Line"; Balancing: Boolean)
+    begin
+        if Balancing or (GenJournalLine."BAASI Alvys Deduction Id" = '') then
+            exit;
+        AlvysSalesMgt.MarkSettlementPosted(GenJournalLine."BAASI Alvys Deduction Id");
+    end;
+
     var
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         SingleInstance: Codeunit "BAASI Single Instance";

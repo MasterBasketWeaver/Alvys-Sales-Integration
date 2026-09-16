@@ -182,7 +182,7 @@ codeunit 80856 "BAASIT Alvys Poll E2E Tests"
         AlvysEntry.SetRange(Direction, AlvysEntry.Direction::Inbound);
         Assert.IsTrue(AlvysEntry.FindLast(), 'The applied settlement should be logged as an inbound entry.');
         Assert.AreEqual('', AlvysEntry."Error Message", StrSubstNo('The settlement should apply cleanly: %1', AlvysEntry."Error Message"));
-        Assert.AreEqual('POLL', AlvysEntry.Method, 'A polled settlement should be logged as polled, not as an HTTP call that never arrived.');
+        Assert.AreEqual('GET', AlvysEntry.Method, 'A polled settlement should be logged with the method of the search it was found on.');
 
         // [WHEN] The payment is posted. With auto-posting on the poll has already done it; with it
         // off the line is waiting in the journal, and posting it here is what lets this phase

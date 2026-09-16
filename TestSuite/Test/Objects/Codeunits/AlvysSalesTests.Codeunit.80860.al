@@ -1,4 +1,4 @@
-codeunit 80850 "BAASIT Alvys Sales Tests"
+codeunit 80860 "BAASIT Alvys Sales Tests"
 {
     // [FEATURE] [Alvys Sales Integration]
     //
@@ -375,7 +375,8 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         DeductionId: Text;
     begin
         // [SCENARIO] A deduction still sitting on an unposted document has no posted invoice for the
-        // settlement to apply against, so the entry says so rather than guessing at a document.
+        // settlement to apply against, so the entry is refused for its missing posted document
+        // rather than guessing at one.
         Initialize();
 
         // [GIVEN] A deduction whose originating document has not been posted
@@ -386,7 +387,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
 
         // [THEN] The call is logged, with no document and the reason it could not be matched
         Assert.AreEqual('', AlvysEntry."Document No.", 'A deduction with no posted invoice should not be pointed at a document.');
-        Assert.IsTrue(AlvysEntry."Error Message".Contains('has not been posted'), 'The error should say the originating document is unposted.');
+        Assert.IsTrue(AlvysEntry."Error Message".Contains(PostedDocumentNoMissingTxt), 'The error should say the deduction has no posted document.');
     end;
 
     [Test]
@@ -509,9 +510,7 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         Initialize();
 
         // [WHEN] A payload arrives with no description
-        AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', -55.0, WorkDate(), '');
-        AlvysEntry.Insert(true);
+        InsertInboundEntryWith(LoggedDeductionId(PostedSalesInvoiceNo()), 'TR2516627931370728085', '1', -55.0, WorkDate(), '', AlvysEntry);
 
         // [THEN] The logged body has no description key
         Assert.IsTrue(RequestBody.ReadFrom(AlvysEntry.GetRequestBody()), 'The logged request body should be valid JSON.');
@@ -543,14 +542,14 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     end;
 
     [Test]
-    procedure UnpostedReasonNamesTheDocumentToPost()
+    procedure UnpostedReasonNamesTheDeduction()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
         AlvysEntry: Record "BAASI Alvys Sales Entry";
         DeductionId: Text;
     begin
         // [SCENARIO] The settlement can be applied once the deduction's document is posted, so the
-        // reason names that document — the actionable part — rather than the deduction alone.
+        // reason names the deduction that is waiting on a posted document.
         Initialize();
 
         // [GIVEN] A deduction sitting on an unposted document
@@ -563,9 +562,10 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         // [WHEN] Alvys settles it
         InsertInboundEntry(DeductionId, AlvysEntry);
 
-        // [THEN] The reason names the document to post
-        Assert.IsTrue(AlvysEntry."Error Message".Contains('Sales Invoice'), 'The reason should name the document type to post.');
-        Assert.IsTrue(AlvysEntry."Error Message".Contains('S-INV1006'), 'The reason should name the document number to post.');
+        // [THEN] The reason names the deduction and what it is missing
+        AlvysDeduction.FindLast();
+        Assert.IsTrue(AlvysEntry."Error Message".Contains(PostedDocumentNoMissingTxt), 'The reason should say the deduction has no posted document.');
+        Assert.IsTrue(AlvysEntry."Error Message".Contains(Format(AlvysDeduction."Entry No.")), 'The reason should name the deduction.');
     end;
 
     [Test]
@@ -597,8 +597,10 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         InsertInboundEntry('', AlvysEntry);
         Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The blank deduction reason should fit the error message field without truncation.');
 
-        InsertInboundEntry(LoggedDeductionId('S-INV-GONE'), AlvysEntry);
-        Assert.IsTrue(StrLen(AlvysEntry."Error Message") < MaxStrLen(AlvysEntry."Error Message"), 'The missing invoice reason should fit the error message field without truncation.');
+        // A posted invoice that no longer exists is not a reason: it stops the call outright, so
+        // there is no entry to fit.
+        asserterror InsertInboundEntry(LoggedDeductionId('S-INV-GONE'), AlvysEntry);
+        AssertMissingInvoiceError('S-INV-GONE');
     end;
 
     [Test]
@@ -762,6 +764,54 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         // [THEN] The receivable it was applied to is paid down by that amount
         Assert.AreEqual(RemainingBefore + AlvysDeduction.Amount, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the settled amount.');
 
+        // [THEN] The deduction records that its settlement was posted, and when
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Settlement Posted", 'Posting the settlement journal line should mark the deduction posted.');
+        Assert.AreNotEqual(0DT, AlvysDeduction."Posted DateTime", 'Posting the settlement journal line should record when it was posted.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SettlementPostedIsRolledBackWhenBatchPostingFails()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        GenJnlLine: Record "Gen. Journal Line";
+        FailSettlBatchCommit: Codeunit "BAASIT Fail Settl Batch Commit";
+    begin
+        // [SCENARIO] The deduction is marked posted inside the posting transaction, before the batch
+        // commits, so a batch that fails after the settlement line has posted leaves the deduction
+        // unmarked rather than claiming a payment that was rolled back.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+
+        // [GIVEN] A settled deduction on an open posted invoice, and a batch that will fail at its commit
+        SettledDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        FailSettlBatchCommit.SetDeductionId(AlvysDeduction.Id);
+        BindSubscription(FailSettlBatchCommit);
+
+        // [WHEN] The settlement is applied and its batch posted, by the setup or by hand
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+        AlvysSetup.Get();
+        if not AlvysSetup."Auto-Post Deductions" then begin
+            GenJnlLine.SetRange("Journal Template Name", AlvysSetup."Payment Journal Template");
+            GenJnlLine.SetRange("Journal Batch Name", AlvysSetup."Payment Journal Batch");
+            Assert.IsTrue(GenJnlLine.FindLast(), 'The settlement should have been written to the payment journal.');
+            Commit();
+            Assert.IsFalse(Codeunit.Run(Codeunit::"Gen. Jnl.-Post Batch", GenJnlLine), 'The bound subscriber should make the batch fail.');
+        end;
+        UnbindSubscription(FailSettlBatchCommit);
+
+        // [THEN] The deduction had been marked posted by the time the batch reached its commit
+        Assert.IsTrue(FailSettlBatchCommit.SettlementPostedBeforeCommit(), 'The deduction should be marked posted before the batch commits.');
+
+        // [THEN] The failure rolled the mark back with the posting
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsFalse(AlvysDeduction."Settlement Posted", 'A batch that failed to commit should leave the deduction unmarked.');
+        Assert.AreEqual(0DT, AlvysDeduction."Posted DateTime", 'A batch that failed to commit should leave no posted time.');
+
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
@@ -812,8 +862,8 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
 
         // [THEN] The entry says where the settlement came from
         AlvysEntry.FindLast();
-        Assert.AreEqual('POLL', AlvysEntry.Method, 'A polled settlement should not be logged as a POST Alvys made.');
-        Assert.AreEqual('deductions/search', AlvysEntry.URL, 'A polled settlement should name the endpoint it was found on.');
+        Assert.AreEqual('GET', AlvysEntry.Method, 'A polled settlement should not be logged as a POST Alvys made.');
+        Assert.IsTrue(AlvysEntry.URL.EndsWith('deductions/search'), 'A polled settlement should name the endpoint it was found on.');
 
         CleanUpDeduction(AlvysDeduction.Id);
     end;
@@ -848,9 +898,8 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     procedure SettlementThatCannotBeAppliedStaysForTheNextRun()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
-        AlvysEntry: Record "BAASI Alvys Sales Entry";
     begin
-        // [SCENARIO] A settlement that could not be applied is logged with its reason but left
+        // [SCENARIO] A settlement whose invoice no longer exists raises an error and is left
         // unmarked, so fixing the cause is enough to make the next run put it through.
         Initialize();
         RequireJournalSetup();
@@ -861,11 +910,10 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         AlvysDeduction.Modify(true);
 
         // [WHEN] The poll tries to apply it
-        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+        asserterror AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
 
-        // [THEN] The reason is logged and the deduction is still eligible
-        AlvysEntry.FindLast();
-        Assert.AreNotEqual('', AlvysEntry."Error Message", 'A settlement that could not be applied should log the reason.');
+        // [THEN] The missing invoice stops it outright, and the deduction is still eligible
+        AssertMissingInvoiceError('NOSUCHINVOICE');
         Assert.IsFalse(AlvysDeduction."Settlement Applied", 'A settlement that failed should be left for the next run to try again.');
 
         CleanUpDeduction(AlvysDeduction.Id);
@@ -1008,6 +1056,12 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     /// A keep-data run skips the clean-up along with the rollback, so the deduction survives for
     /// inspection alongside the Business Central documents.
     /// </summary>
+    local procedure AssertMissingInvoiceError(PostedInvoiceNo: Code[20])
+    begin
+        Assert.ExpectedError('The Sales Invoice Header does not exist.');
+        Assert.IsTrue(GetLastErrorText().Contains(PostedInvoiceNo), StrSubstNo('The error should name invoice %1.', PostedInvoiceNo));
+    end;
+
     local procedure CleanUpDeduction(DeductionID: Text)
     begin
         if TestMode.GetKeepData() then
@@ -1070,8 +1124,13 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
     /// </summary>
     local procedure InsertInboundEntryWith(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; var AlvysEntry: Record "BAASI Alvys Sales Entry")
     begin
+        InsertInboundEntryWith(DeductionId, TruckId, TruckNumber, Amount, SettlementDate, 'Settlement 12345', AlvysEntry);
+    end;
+
+    local procedure InsertInboundEntryWith(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    begin
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, 'Settlement 12345');
+        AlvysSalesMgt.PrepareInboundSettlementEntry(AlvysEntry, DeductionId, TruckId, TruckNumber, Amount, SettlementDate, Description, 'POST', '');
         AlvysEntry.Insert(true);
     end;
 
@@ -1215,4 +1274,5 @@ codeunit 80850 "BAASIT Alvys Sales Tests"
         AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
         JsonMgt: Codeunit "BAAPI Json Mgt.";
         TestMode: Codeunit "BAASIT Test Mode";
+        PostedDocumentNoMissingTxt: Label 'must have a Posted Document No. specified before it can be applied.', Locked = true;
 }

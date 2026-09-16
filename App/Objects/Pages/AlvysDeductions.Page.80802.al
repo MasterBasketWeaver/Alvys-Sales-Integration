@@ -34,6 +34,8 @@ page 80802 "BAASI Alvys Deductions"
                 field("Is Paid"; Rec."Is Paid") { }
                 field("Settlement Applied"; Rec."Settlement Applied") { }
                 field("Settlement Applied At"; Rec."Settlement Applied At") { }
+                field("Settlement Posted"; Rec."Settlement Posted") { }
+                field("Posted DateTime"; Rec."Posted DateTime") { }
                 field("Document Type"; Rec."Document Type") { }
                 field("Document No."; Rec."Document No.")
                 {
@@ -90,7 +92,7 @@ page 80802 "BAASI Alvys Deductions"
                     NewLine, IsHandled : Boolean;
                 begin
                     Rec.TestField("Is Paid", true);
-                    Rec.TestField("Settlement Applied", false);
+                    Rec.TestField("Settlement Posted", false);
                     Rec.TestField("Posted Document No.");
 
                     GenJnlLine.SetRange("BAASI Alvys Deduction Id", Rec."Id");
@@ -100,6 +102,7 @@ page 80802 "BAASI Alvys Deductions"
                     if ErrorText <> '' then
                         Error(ErrorText);
 
+                    AlvysSalesSetup.Get();
                     if not AlvysSalesSetup."Auto-Post Deductions" then begin
                         GenJnlLine.SetRange("BAASI Alvys Deduction Id", Rec."Id");
                         GenJnlLine.FindFirst();

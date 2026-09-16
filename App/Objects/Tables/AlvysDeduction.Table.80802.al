@@ -80,6 +80,16 @@ table 80802 "BAASI Alvys Deduction"
             Editable = false;
             Tooltip = 'The date and time the settlement was written to the payment journal.';
         }
+        field(18; "Settlement Posted"; Boolean)
+        {
+            Editable = false;
+            Tooltip = 'Whether the payment journal line that applies the settlement has been posted, whether it was posted automatically or by hand.';
+        }
+        field(19; "Posted DateTime"; DateTime)
+        {
+            Editable = false;
+            Tooltip = 'The date and time the payment journal line that applies the settlement was posted.';
+        }
         field(20; "Document Type"; Enum "BAASI Alvys Entry Doc. Type")
         {
             Editable = false;

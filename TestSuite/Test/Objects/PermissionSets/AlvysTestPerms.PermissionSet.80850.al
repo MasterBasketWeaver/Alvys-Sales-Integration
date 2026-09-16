@@ -16,6 +16,8 @@ permissionset 80850 "BAASIT Test Perms."
         page "BAASIT Alvys Ded. Seed API" = X,
         codeunit "BAASIT Alvys Sales Tests" = X,
         codeunit "BAASIT Fleetrock E2E Tests" = X,
+        codeunit "BAASIT Fail Settl Batch Commit" = X,
+        codeunit "BAASIT RO Post Location" = X,
         codeunit "BAASIT Alvys Test Runner" = X,
         codeunit "BAASIT Test Runner No Rollback" = X,
         codeunit "BAASIT Test Mode" = X,
