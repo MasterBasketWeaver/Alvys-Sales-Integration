@@ -20,6 +20,7 @@ page 80801 "BAASI Alvys Sales Entries"
                 field("Created At"; Rec.SystemCreatedAt) { }
                 field("Created By"; Rec."Created By") { }
                 field(Direction; Rec.Direction) { }
+                field("Deduction Id"; Rec."Deduction Id") { }
                 field("Document Type"; Rec."Document Type") { }
                 field("Document No."; Rec."Document No.")
                 {

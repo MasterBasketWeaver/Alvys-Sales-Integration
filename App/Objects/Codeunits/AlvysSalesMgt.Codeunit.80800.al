@@ -455,11 +455,6 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
 
-    /// <summary>
-    /// Fills in the parts of an inbound entry the caller cannot supply: Alvys posts the payload to
-    /// the API page, so it has no way to number the entry or to mark which way the call went.
-    /// Called from the page's insert trigger, before the record reaches the table.
-    /// </summary>
     internal procedure PrepareInboundEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; RequestBody: Text)
     var
         LastEntry: Record "BAASI Alvys Sales Entry";
@@ -541,14 +536,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         // AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
     // end;
 
-    /// <summary>
-    /// The same, for a settlement Business Central polled for rather than one Alvys posted, so that
-    /// it does not log itself as an HTTP call that never arrived.
-    /// </summary>
-    // internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; var AlvysDeduction: Record "BAASI Alvys Deduction"; DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text; Method: Text; URL: Text)
     internal procedure PrepareApplyDeductionEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"; var AlvysDeduction: Record "BAASI Alvys Deduction"; SettlementDate: Date; Method: Text; URL: Text)
     var
         AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
+        SalesInvHeader: Record "Sales Invoice Header";
         ErrorText: Text;
     begin
         ErrorText := ApplyDeductionSetupError(AlvysSalesSetup);
@@ -558,7 +549,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
                 AlvysEntry.URL := CopyStr(AlvysSalesSetup."Integration URL" + URL, 1, MaxStrLen(AlvysEntry.URL));
                 AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
                 AlvysEntry."Document No." := AlvysDeduction."Posted Document No.";
-                ErrorText := ApplyDeductionPayloadError(AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate);
+                if not SalesInvHeader.Get(AlvysDeduction."Posted Document No.") then
+                    LogMissingInvoiceAndRaise(AlvysEntry, AlvysDeduction, SettlementDate);
+                ErrorText := ApplyDeductionInvoiceError(AlvysDeduction);
+                if ErrorText = '' then
+                    ErrorText := ApplyDeductionPayloadError(AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate);
                 if ErrorText = '' then
                     ErrorText := ApplyDeductionPayment(AlvysDeduction, AlvysSalesSetup, AlvysEntry."Document No.", AlvysDeduction.Amount, SettlementDate);
             end else
@@ -568,6 +563,42 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
 
         PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate, AlvysDeduction.Description));
+        AlvysEntry."Deduction Id" := AlvysDeduction.Id;
+    end;
+
+    /// <summary>
+    /// The error rolls back everything since the last commit, so the entry is committed first to
+    /// survive it.
+    /// </summary>
+    local procedure LogMissingInvoiceAndRaise(var AlvysEntry: Record "BAASI Alvys Sales Entry"; var AlvysDeduction: Record "BAASI Alvys Deduction"; SettlementDate: Date)
+    var
+        ErrorText: Text;
+    begin
+        ErrorText := StrSubstNo(NoSalesInvoiceFoundErr, AlvysDeduction."Posted Document No.", AlvysDeduction.Id);
+        AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
+        PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate, AlvysDeduction.Description));
+        AlvysEntry."Deduction Id" := AlvysDeduction.Id;
+        InsertSettlementEntry(AlvysEntry);
+        Commit();
+        Error(ErrorText);
+    end;
+
+    /// <summary>
+    /// A settlement that keeps failing is retried on every poll, so an error already logged for the
+    /// same deduction is not logged again. Returns whether the entry was inserted.
+    /// </summary>
+    internal procedure InsertSettlementEntry(var AlvysEntry: Record "BAASI Alvys Sales Entry"): Boolean
+    var
+        LoggedEntry: Record "BAASI Alvys Sales Entry";
+    begin
+        if AlvysEntry."Error Message" <> '' then begin
+            LoggedEntry.SetRange("Deduction Id", AlvysEntry."Deduction Id");
+            LoggedEntry.SetRange("Error Message", AlvysEntry."Error Message");
+            if not LoggedEntry.IsEmpty() then
+                exit(false);
+        end;
+        AlvysEntry.Insert(true);
+        exit(true);
     end;
 
     /// <summary>
@@ -585,70 +616,38 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysEntry."Document No." := AlvysDeduction."Posted Document No.";
         AlvysEntry."Error Message" := CopyStr(ErrorText, 1, MaxStrLen(AlvysEntry."Error Message"));
         PrepareInboundEntry(AlvysEntry, ApplyDeductionRequestBody(AlvysDeduction.Id, AlvysDeduction."Truck Id", AlvysDeduction."Truck Number", AlvysDeduction.Amount, SettlementDate, AlvysDeduction.Description));
+        AlvysEntry."Deduction Id" := AlvysDeduction.Id;
         AlvysEntry.SetErrorStack(ErrorStack);
     end;
 
     /// <summary>
-    /// Resolves the deduction Alvys settled to the posted sales invoice it was raised against, and
-    /// hands the invoice back so the payment can be applied to it without looking it up twice.
-    /// Returns a blank document number and the reason in ErrorText when no invoice can be reached.
-    /// Each reason names what was missing, so whoever reads the log can tell a deduction waiting on
-    /// an unposted document from one Business Central has no record of at all.
+    /// Checks the posted invoice can still take the settlement. The caller has already made sure the
+    /// invoice exists.
     /// </summary>
-    local procedure ApplyDeductionDocumentNo(DeductionId: Text; var ErrorText: Text): Code[20]
+    local procedure ApplyDeductionInvoiceError(var AlvysDeduction: Record "BAASI Alvys Deduction"): Text
     var
         SalesInvHeader: Record "Sales Invoice Header";
-        AlvysDeduction: Record "BAASI Alvys Deduction";
     begin
-        if DeductionId = '' then begin
-            ErrorText := ApplyBlankDeductionErr;
-            exit('');
-        end;
+        SalesInvHeader.Get(AlvysDeduction."Posted Document No.");
 
-        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
-        if not AlvysDeduction.FindLast() then begin
-            ErrorText := StrSubstNo(NoDeductionFoundErr, DeductionId);
-            exit('');
-        end;
+        SalesInvHeader.CalcFields(Closed, Cancelled, Reversed);
+        if SalesInvHeader.Closed then
+            exit(StrSubstNo(SalesInvAlreadyClosedErr, SalesInvHeader."No."));
+        if SalesInvHeader.Cancelled or SalesInvHeader.Reversed then
+            exit(StrSubstNo(SalesInvCancelledOrReversedErr, SalesInvHeader."No."));
 
-        // The posted invoice number is stamped on the deduction when the originating document is
-        // posted. While it is blank the deduction still sits on an unposted document, and there is
-        // no posted invoice for the settlement to apply against — yet.
-        if AlvysDeduction."Posted Document No." = '' then begin
-            ErrorText := StrSubstNo(DeductionNotPostedErr, DeductionId, Format(AlvysDeduction."Document Type"), AlvysDeduction."Document No.");
-            exit('');
-        end;
-
-        if not SalesInvHeader.Get(AlvysDeduction."Posted Document No.") then begin
-            ErrorText := StrSubstNo(NoSalesInvoiceFoundErr, AlvysDeduction."Posted Document No.", DeductionId);
-            exit('');
-        end;
-
-        SalesInvHeader.CalcFields(Closed);
-        if SalesInvHeader.Closed then begin
-            ErrorText := StrSubstNo(SalesInvAlreadyClosedErr, SalesInvHeader."No.");
-            exit('');
-        end;
-
-        SalesInvHeader.CalcFields(Cancelled, Reversed);
-        if SalesInvHeader.Cancelled or SalesInvHeader.Reversed then begin
-            ErrorText := StrSubstNo(SalesInvCancelledOrReversedErr, SalesInvHeader."No.");
-            exit('');
-        end;
-
+        // Deductions are held negative and the receivable positive.
         SalesInvHeader.CalcFields("Remaining Amount");
-        if AlvysDeduction.Amount > SalesInvHeader."Remaining Amount" then begin
-            ErrorText := StrSubstNo(SalesInvRemainingAmountErr, SalesInvHeader."No.", SalesInvHeader."Remaining Amount", AlvysDeduction.Amount);
-            exit('');
-        end;
+        if SalesInvHeader."Remaining Amount" < Abs(AlvysDeduction.Amount) then
+            exit(StrSubstNo(SalesInvRemainingAmountErr, SalesInvHeader."No.", SalesInvHeader."Remaining Amount", Abs(AlvysDeduction.Amount)));
 
-        exit(SalesInvHeader."No.");
+        exit('');
     end;
 
     /// <summary>
-    /// Checks the driver pay payload carries what a settlement has to be applied from, and returns
-    /// the reason it does not. Alvys names the truck by either field, so only a payload naming it
-    /// by neither is refused; which one arrived is not this codeunit's business.
+    /// Checks the deduction carries what a settlement has to be applied from, and returns the reason
+    /// it does not. The truck may be named by either field, so only a deduction naming it by
+    /// neither is refused.
     /// </summary>
     local procedure ApplyDeductionPayloadError(TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date): Text
     begin
@@ -656,8 +655,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             exit(ApplyMissingTruckErr);
 
         // A settlement clears a deduction, and deductions are held negative, so the amount that
-        // applies one is negative too. An amount left out of the payload arrives as zero, so the
-        // same test covers both a missing amount and one that would apply nothing.
+        // applies one is negative too; zero would apply nothing.
         if Amount >= 0 then
             exit(StrSubstNo(ApplyInvalidAmountErr, Amount));
 
@@ -670,8 +668,8 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     /// <summary>
     /// Checks the setup names the journal a settlement is written to and the account its payment
     /// side is posted to, and hands the setup back to whoever passed the check. The reason is
-    /// returned rather than raised: a settlement Alvys sent is logged whatever stopped it, and a
-    /// TestField here would roll the entry back along with the reason it carries.
+    /// returned rather than raised: a settlement is logged whatever stopped it, and a TestField here
+    /// would roll the entry back along with the reason it carries.
     /// </summary>
     local procedure ApplyDeductionSetupError(var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"): Text
     begin
@@ -697,7 +695,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     ///
     /// A batch that will not post is caught rather than raised. The line is already written, so the
     /// settlement is not lost by the failure — it is left in the journal for someone to correct and
-    /// post by hand, and the reason goes to the entry log and back to Alvys.
+    /// post by hand, and the reason goes to the entry log.
     /// </summary>
     local procedure ApplyDeductionPayment(var AlvysDeduction: Record "BAASI Alvys Deduction"; var AlvysSalesSetup: Record "BAASI Alvys Sales Setup"; DocumentNo: Code[20]; Amount: Decimal; SettlementDate: Date): Text
     var
@@ -836,12 +834,8 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
-    /// Rebuilds the payload Alvys sent from the fields the page received, so the entry logs the
-    /// call in the same shape as the outbound requests. The keys are Alvys' own field names.
-    ///
-    /// The optional fields — the two truck fields and the description — are left out when they did
-    /// not arrive rather than written blank, so the logged body says which of the two Alvys
-    /// identified the truck by, and reads as the call it was.
+    /// The settlement as logged on the entry, keyed by Alvys' own field names. Blank truck fields and
+    /// a blank description are left out rather than written empty.
     /// </summary>
     local procedure ApplyDeductionRequestBody(DeductionId: Text; TruckId: Text; TruckNumber: Text; Amount: Decimal; SettlementDate: Date; Description: Text): Text
     var
@@ -926,11 +920,10 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         ApplySetupFieldBlankErr: Label 'The Alvys Sales Setup has no %1, so the settlement has no journal to be written to.', Comment = '%1 = the blank setup field''s caption';
         ApplyPostingFailedErr: Label 'The settlement was written to journal batch %1 %2, but the batch could not be posted: %3', Comment = '%1 = Payment Journal Template, %2 = Payment Journal Batch, %3 = the posting error';
         NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
-        DeductionNotPostedErr: Label 'Deduction %1 is on %2 %3, which has not been posted yet.', Comment = '%1 = Deduction Id, %2 = Document Type, %3 = Document No.';
-        NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on the deduction with Id %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';
         MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
         UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
-        MissingPostedDocumentNoErr: Label 'Deduction %1 must have a Posted Document No. specified before it can be applied.', Comment = '%1 = Deduction Id';
+        NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on deduction %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';
+        MissingPostedDocumentNoErr: Label 'Deduction %1 must have a Posted Document No. specified before it can be applied.', Comment = '%1 = Deduction Entry No.';
         SalesInvAlreadyClosedErr: Label 'Sales Invoice %1 has already been closed.', Comment = '%1 = Sales Invoice No.';
         SalesInvCancelledOrReversedErr: Label 'Sales Invoice %1 has already been cancelled or reversed.', Comment = '%1 = Sales Invoice No.';
         SalesInvRemainingAmountErr: Label 'Sales Invoice %1''s remaining amount of %2 is less than the deduction amount of %3.', Comment = '%1 = Sales Invoice No., %2 = Remaining Amount, %3 = Deduction Amount';

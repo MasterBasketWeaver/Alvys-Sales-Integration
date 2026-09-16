@@ -2,7 +2,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
 {
     // Alvys has no driver pay webhook event and no settlement resource in the public API, so a
     // settlement can only be found by looking: the IsPaid flag on the deduction turning over is the
-    // whole signal. This does by polling what page 80803 does when Alvys posts a settlement in.
+    // whole signal.
 
     Permissions = tabledata "BAASI Alvys Deduction" = RIMD,
         tabledata "BAASI Alvys Sales Entry" = RIMD;
@@ -144,7 +144,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
             exit;
         AlvysEntry.Init();
         AlvysSalesMgt.PrepareFailedSettlementEntry(AlvysEntry, AlvysDeduction, WorkDate(), ErrorText, ErrorStack, 'GET', 'deductions/search');
-        AlvysEntry.Insert(true);
+        AlvysSalesMgt.InsertSettlementEntry(AlvysEntry);
         Commit();
     end;
 
@@ -159,7 +159,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     begin
         AlvysEntry.Init();
         AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, WorkDate(), 'GET', 'deductions/search');
-        AlvysEntry.Insert(true);
+        AlvysSalesMgt.InsertSettlementEntry(AlvysEntry);
 
         exit(AlvysEntry."Error Message");
     end;

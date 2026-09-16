@@ -50,6 +50,11 @@ table 80801 "BAASI Alvys Sales Entry"
             Editable = false;
             Tooltip = 'Whether the entry logs a request Business Central sent to Alvys, or one Alvys sent to Business Central.';
         }
+        field(13; "Deduction Id"; Text[50])
+        {
+            Editable = false;
+            Tooltip = 'The Alvys deduction a settlement entry was logged for.';
+        }
     }
 
     keys
@@ -59,6 +64,7 @@ table 80801 "BAASI Alvys Sales Entry"
             Clustered = true;
         }
         key(K1; Direction) { }
+        key(K2; "Deduction Id") { }
     }
 
 

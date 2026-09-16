@@ -898,9 +898,11 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     procedure SettlementThatCannotBeAppliedStaysForTheNextRun()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
     begin
-        // [SCENARIO] A settlement whose invoice no longer exists raises an error and is left
-        // unmarked, so fixing the cause is enough to make the next run put it through.
+        // [SCENARIO] A settlement whose invoice no longer exists raises an error, is logged once
+        // however often the poll retries it, and is left unmarked, so fixing the cause is enough to
+        // make the next run put it through.
         Initialize();
         RequireJournalSetup();
 
@@ -909,12 +911,86 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         AlvysDeduction."Posted Document No." := 'NOSUCHINVOICE';
         AlvysDeduction.Modify(true);
 
-        // [WHEN] The poll tries to apply it
-        asserterror AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
-
-        // [THEN] The missing invoice stops it outright, and the deduction is still eligible
+        // [WHEN] The poll tries to apply it on two runs, the way the job queue starts each attempt.
+        // Applying commits the log entry before raising, which asserterror cannot hold.
+        Commit();
+        Assert.IsFalse(Codeunit.Run(Codeunit::"BAASI Apply Settled Deduction", AlvysDeduction), 'A settlement whose invoice no longer exists should raise an error.');
         AssertMissingInvoiceError('NOSUCHINVOICE');
+        Commit();
+        Assert.IsFalse(Codeunit.Run(Codeunit::"BAASI Apply Settled Deduction", AlvysDeduction), 'The retry should raise the same error.');
+
+        // [THEN] The error is logged against the deduction exactly once
+        AlvysEntry.SetRange("Deduction Id", AlvysDeduction.Id);
+        Assert.AreEqual(1, AlvysEntry.Count(), 'The missing invoice should be logged once however often it is retried.');
+        AlvysEntry.FindFirst();
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('NOSUCHINVOICE'), StrSubstNo('The logged error should name the missing invoice: %1', AlvysEntry."Error Message"));
+
+        // [THEN] The deduction is still eligible for the next run
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
         Assert.IsFalse(AlvysDeduction."Settlement Applied", 'A settlement that failed should be left for the next run to try again.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SettlementOnClosedInvoiceIsRefused()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        GenJnlLine: Record "Gen. Journal Line";
+    begin
+        // [SCENARIO] An invoice that is already paid off has no receivable left to apply a
+        // settlement to, so the settlement is logged with the reason and left unapplied.
+        Initialize();
+        RequireJournalSetup();
+
+        // [GIVEN] A settled deduction on a closed posted invoice
+        SettledDeduction(ClosedPostedInvoiceNo(), AlvysDeduction);
+
+        // [WHEN] The poll tries to apply it, and tries again on its next run
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+
+        // [THEN] The reason is logged once, no journal line is written and the deduction stays unapplied
+        AlvysEntry.SetRange("Deduction Id", AlvysDeduction.Id);
+        Assert.AreEqual(1, AlvysEntry.Count(), 'A refusal repeated on the next run should not be logged again.');
+        AlvysEntry.FindFirst();
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('has already been closed'), StrSubstNo('The entry should say the invoice is closed: %1', AlvysEntry."Error Message"));
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", AlvysDeduction.Id);
+        Assert.IsTrue(GenJnlLine.IsEmpty(), 'No journal line should be written for a closed invoice.');
+        Assert.IsFalse(AlvysDeduction."Settlement Applied", 'A refused settlement should not be marked applied.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SettlementLargerThanRemainingAmountIsRefused()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        GenJnlLine: Record "Gen. Journal Line";
+        InvoiceNo: Code[20];
+    begin
+        // [SCENARIO] A settlement for more than the invoice still has outstanding would overpay it,
+        // so it is logged with the reason and left unapplied.
+        Initialize();
+        RequireJournalSetup();
+
+        // [GIVEN] A settled deduction for more than its open invoice has remaining
+        InvoiceNo := OpenPostedInvoiceNo();
+        SettledDeduction(InvoiceNo, AlvysDeduction);
+        AlvysDeduction.Amount := -(InvoiceRemainingAmount(InvoiceNo) + 1);
+        AlvysDeduction.Modify(true);
+
+        // [WHEN] The poll tries to apply it
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+
+        // [THEN] The reason is logged, no journal line is written and the deduction stays unapplied
+        AlvysEntry.FindLast();
+        Assert.IsTrue(AlvysEntry."Error Message".Contains('remaining amount'), StrSubstNo('The entry should say the remaining amount is too small: %1', AlvysEntry."Error Message"));
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", AlvysDeduction.Id);
+        Assert.IsTrue(GenJnlLine.IsEmpty(), 'No journal line should be written for a settlement larger than the remaining amount.');
+        Assert.IsFalse(AlvysDeduction."Settlement Applied", 'A refused settlement should not be marked applied.');
 
         CleanUpDeduction(AlvysDeduction.Id);
     end;
@@ -970,6 +1046,21 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(GenJnlLine.FindLast(), 'The settlement should have been written to the payment journal.');
         Commit();
         Assert.IsTrue(Codeunit.Run(Codeunit::"Gen. Jnl.-Post Batch", GenJnlLine), StrSubstNo('Posting the settlement batch should succeed: %1', GetLastErrorText()));
+    end;
+
+    local procedure ClosedPostedInvoiceNo(): Code[20]
+    var
+        CustLedgEntry: Record "Cust. Ledger Entry";
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Invoice);
+        CustLedgEntry.SetRange(Open, false);
+        if CustLedgEntry.FindSet() then
+            repeat
+                if SalesInvHeader.Get(CustLedgEntry."Document No.") then
+                    exit(SalesInvHeader."No.");
+            until CustLedgEntry.Next() = 0;
+        Assert.Fail('The company needs a closed posted sales invoice for the closed invoice test.');
     end;
 
     /// <summary>
@@ -1058,8 +1149,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// </summary>
     local procedure AssertMissingInvoiceError(PostedInvoiceNo: Code[20])
     begin
-        Assert.ExpectedError('The Sales Invoice Header does not exist.');
-        Assert.IsTrue(GetLastErrorText().Contains(PostedInvoiceNo), StrSubstNo('The error should name invoice %1.', PostedInvoiceNo));
+        Assert.ExpectedError(StrSubstNo('Posted sales invoice %1', PostedInvoiceNo));
+        Assert.IsTrue(GetLastErrorText().Contains('no longer exists'), 'The error should say the invoice no longer exists.');
     end;
 
     local procedure CleanUpDeduction(DeductionID: Text)
