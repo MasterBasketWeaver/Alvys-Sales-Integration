@@ -1274,6 +1274,203 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+    [Test]
+    procedure SplitOfASplitPartIsSettledAndRollsUpBothLevels()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo: Code[20];
+        PartId, SiblingId, FirstSubPartId, SecondSubPartId : Text;
+        PartEntryNo: Integer;
+        RemainingBefore: Decimal;
+    begin
+        // [SCENARIO] A part Alvys has already split can be split again. What the second split settles
+        // is carried up through the part it came from to the deduction Business Central raised, and
+        // the invoice is paid down once for each amount Alvys actually settled.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+
+        // [GIVEN] A deduction of -1.25 split into a part of -0.75 and one of -0.50
+        InvoiceNo := OpenPostedInvoiceNo();
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        PartId := Format(CreateGuid());
+        SiblingId := Format(CreateGuid());
+        AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        FindSplitPart(AlvysDeduction, PartId, SplitPart);
+        PartEntryNo := SplitPart."Entry No.";
+
+        // [WHEN] Alvys splits the -0.75 part into -0.50 and -0.25
+        FirstSubPartId := Format(CreateGuid());
+        SecondSubPartId := Format(CreateGuid());
+        Clear(Items);
+        AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, false);
+        AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] The second split hangs off the part, which keeps its place under the deduction
+        SplitPart.Get(PartEntryNo);
+        Assert.IsTrue(SplitPart."Split in Alvys", 'A part Alvys no longer returns should be marked split.');
+        Assert.AreEqual(2, SplitPartCount(SplitPart), 'The parts of the second split should be logged under the part that was split.');
+        Assert.AreEqual(AlvysDeduction."Entry No.", SplitPart."Split From Entry No.", 'The split part should still point at the deduction it came from.');
+        FindSplitPart(SplitPart, FirstSubPartId, Leaf);
+        Assert.AreEqual(SplitPart."Entry No.", Leaf."Split From Entry No.", 'A part of the second split should point at the part it came from.');
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(2, SplitPartCount(AlvysDeduction), 'The deduction should keep the two parts of the first split.');
+        Assert.AreEqual(-1.25, AlvysDeduction."Remaining Amount", 'Splitting settles nothing, so the whole amount should still be remaining.');
+
+        // [WHEN] Alvys settles all three open parts and each is applied
+        Clear(Items);
+        AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, true);
+        AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, true);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        SplitPart.Get(PartEntryNo);
+        Assert.IsTrue(SplitPart."Is Paid", 'A split part with every part of its own paid should be marked paid.');
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Is Paid", 'A deduction with every part paid, at whatever depth, should be marked paid.');
+
+        FindSplitPart(SplitPart, FirstSubPartId, Leaf);
+        AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, SecondSubPartId, Leaf);
+        AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+
+        // [THEN] The part is applied once its own parts are, while the deduction waits for its other part
+        SplitPart.Get(PartEntryNo);
+        Assert.IsTrue(SplitPart."Settlement Applied", 'A split part whose parts are applied should be marked applied.');
+        Assert.AreEqual(0, SplitPart."Remaining Amount", 'A split part whose parts are applied should have nothing remaining.');
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsFalse(AlvysDeduction."Settlement Applied", 'The deduction should wait for the part that is still open.');
+        Assert.AreEqual(-0.5, AlvysDeduction."Remaining Amount", 'The open part should be what is left remaining.');
+
+        // [WHEN] The last part is applied and the batch is posted
+        FindSplitPart(AlvysDeduction, SiblingId, Leaf);
+        AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+        PostSettlementBatch();
+
+        // [THEN] The deduction is done, and the invoice was paid down by each settled amount once
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Settlement Applied", 'A deduction with every part applied should be marked applied.');
+        Assert.IsTrue(AlvysDeduction."Settlement Posted", 'A deduction with every part posted should be marked posted.');
+        Assert.AreEqual(0, AlvysDeduction."Remaining Amount", 'Nothing should remain once every part is applied.');
+        SplitPart.Get(PartEntryNo);
+        Assert.IsTrue(SplitPart."Settlement Posted", 'A split part whose parts are posted should be marked posted.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure FourSplitsDeepStillSettleTheDeductionOnce()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo: Code[20];
+        LeafIds: List of [Text];
+        SplitEntryNos: List of [Integer];
+        SplitId, LeafId : Text;
+        EntryNo, Depth : Integer;
+        RemainingBefore: Decimal;
+    begin
+        // [SCENARIO] Alvys can go on splitting a part it has already split. Four splits deep, every
+        // part still points back at the one it came from, and settling the leaves settles the
+        // deduction Business Central raised exactly once.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+
+        // [GIVEN] A deduction of -1.25 against an open invoice
+        InvoiceNo := OpenPostedInvoiceNo();
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        SplitId := Format(CreateGuid());
+
+        // [WHEN] It is split, and the part carrying the balance is split again three times over.
+        // Each split leaves a -0.25 part behind and carries the rest into the next one.
+        for Depth := 1 to 4 do begin
+            LeafId := Format(CreateGuid());
+            LeafIds.Add(LeafId);
+            SplitId := Format(CreateGuid());
+            Clear(Items);
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
+            // What is left of the deduction after the parts split off so far, carried into the
+            // next split: -1.00, then -0.75, -0.50 and -0.25.
+            AddSearchItem(Items, SplitId, AlvysDeduction."Group Id", -1.25 + (Depth * 0.25), false);
+            AddOpenLeaves(Items, AlvysDeduction."Group Id", LeafIds, LeafId);
+            AlvysSettlementPoll.RefreshFromSearch(Items);
+            FindDeduction(SplitId, SplitPart);
+            SplitEntryNos.Add(SplitPart."Entry No.");
+        end;
+        LeafIds.Add(SplitId);
+
+        // [THEN] The chain runs from the last split back to the deduction, and each level is marked
+        // split and has its two parts
+        FindDeduction(SplitId, Leaf);
+        for Depth := 4 downto 1 do begin
+            if Depth = 1 then
+                EntryNo := AlvysDeduction."Entry No."
+            else
+                EntryNo := SplitEntryNos.Get(Depth - 1);
+            Assert.AreEqual(EntryNo, Leaf."Split From Entry No.", StrSubstNo('The part from split %1 should point at the deduction it was split from.', Depth));
+            Leaf.Get(EntryNo);
+            Assert.IsTrue(Leaf."Split in Alvys", StrSubstNo('The deduction split at level %1 should be marked split.', Depth));
+            Assert.AreEqual(2, SplitPartCount(Leaf), StrSubstNo('Split %1 should have logged two parts.', Depth));
+        end;
+
+        // [WHEN] Alvys settles every leaf and each is applied
+        Clear(Items);
+        foreach LeafId in LeafIds do
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        foreach LeafId in LeafIds do begin
+            FindDeduction(LeafId, Leaf);
+            AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+        end;
+        PostSettlementBatch();
+
+        // [THEN] The deduction is paid, applied and posted, and the invoice was paid down by its
+        // amount once, not once per level
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Is Paid", 'A deduction settled four splits down should be marked paid.');
+        Assert.IsTrue(AlvysDeduction."Settlement Applied", 'A deduction settled four splits down should be marked applied.');
+        Assert.IsTrue(AlvysDeduction."Settlement Posted", 'A deduction settled four splits down should be marked posted.');
+        Assert.AreEqual(0, AlvysDeduction."Remaining Amount", 'Nothing should remain once every leaf is applied.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    /// <summary>
+    /// The leaves earlier splits left behind. A search returns everything Alvys still holds, so a
+    /// part that was not touched by the latest split has to keep coming back with it.
+    /// </summary>
+    local procedure AddOpenLeaves(var Items: JsonArray; GroupId: Text; var LeafIds: List of [Text]; ExceptLeafId: Text)
+    var
+        LeafId: Text;
+    begin
+        foreach LeafId in LeafIds do
+            if LeafId <> ExceptLeafId then
+                AddSearchItem(Items, LeafId, GroupId, -0.25, false);
+    end;
+
+    local procedure FindDeduction(DeductionId: Text; var AlvysDeduction: Record "BAASI Alvys Deduction")
+    begin
+        AlvysDeduction.Reset();
+        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        Assert.IsTrue(AlvysDeduction.FindFirst(), StrSubstNo('Deduction %1 should be logged.', DeductionId));
+        AlvysDeduction.SetRange(Id);
+    end;
+
     /// <summary>
     /// Creates a real deduction in Alvys against the posted invoice given and leaves it unpaid.
     /// </summary>
