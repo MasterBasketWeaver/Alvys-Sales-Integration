@@ -1450,6 +1450,563 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+    [Test]
+    procedure SplitOfASplitPaysTheInvoiceALinePerSettledPart()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo, CustomerNo : Code[20];
+        PartId, SiblingId, FirstSubPartId, SecondSubPartId : Text;
+        PartEntryNo, LedgerWatermark, PaymentCount : Integer;
+        RemainingBefore, PostedTotal : Decimal;
+        WasAutoPost: Boolean;
+    begin
+        // [SCENARIO] Once every part of a split of a split is paid, each one is written to the
+        // payment journal as its own line and posts as its own payment against the invoice, and
+        // every record up the chain ends up saying so.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        // Auto-posting would post each line as it was written, leaving nothing in the journal to
+        // look at, so the lines are posted here instead and the company's setting put back after.
+        WasAutoPost := SetAutoPostDeductions(false);
+
+        // [GIVEN] A deduction of -1.25 split into -0.75 and -0.50, with the -0.75 split again into
+        // -0.50 and -0.25, and every part paid in Alvys
+        InvoiceNo := OpenPostedInvoiceNo();
+        CustomerNo := BillToCustomerNo(InvoiceNo);
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        PartId := Format(CreateGuid());
+        SiblingId := Format(CreateGuid());
+        FirstSubPartId := Format(CreateGuid());
+        SecondSubPartId := Format(CreateGuid());
+
+        AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        FindSplitPart(AlvysDeduction, PartId, SplitPart);
+        PartEntryNo := SplitPart."Entry No.";
+
+        Clear(Items);
+        AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, true);
+        AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, true);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [WHEN] The poll applies everything it has to apply
+        ApplyEverythingSettled(AlvysDeduction."Group Id");
+
+        // [THEN] Each settled part has a journal line of its own, for its own amount, applied to the
+        // invoice the deduction was raised against
+        Assert.AreEqual(3, SettlementLineCount(), 'Each settled part should have a line of its own in the payment journal.');
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, FirstSubPartId, Leaf);
+        AssertSettlementLine(Leaf.Id, -0.5, InvoiceNo, CustomerNo);
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, SecondSubPartId, Leaf);
+        AssertSettlementLine(Leaf.Id, -0.25, InvoiceNo, CustomerNo);
+        FindSplitPart(AlvysDeduction, SiblingId, Leaf);
+        AssertSettlementLine(Leaf.Id, -0.5, InvoiceNo, CustomerNo);
+
+        // [THEN] Nothing was written for the two records Alvys split, which it never settled
+        AssertNoSettlementLine(AlvysDeduction.Id, 'the deduction that was split');
+        SplitPart.Get(PartEntryNo);
+        AssertNoSettlementLine(SplitPart.Id, 'the part that was split again');
+
+        // [THEN] Before the batch is posted, everything is applied and nothing is posted
+        AssertApplied(PartEntryNo, 'the part that was split again');
+        AssertApplied(AlvysDeduction."Entry No.", 'the deduction');
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsFalse(AlvysDeduction."Settlement Posted", 'Nothing should be marked posted while the lines are still in the journal.');
+
+        // [WHEN] The batch is posted
+        LedgerWatermark := LastCustLedgerEntryNo();
+        PostSettlementBatch();
+
+        // [THEN] The journal is empty, and one payment per part was posted for the settled amounts
+        Assert.AreEqual(0, SettlementLineCount(), 'Posting should leave no settlement lines behind.');
+        PostedTotal := PostedPaymentTotal(CustomerNo, LedgerWatermark, PaymentCount);
+        Assert.AreEqual(3, PaymentCount, 'Each part should have posted as a payment of its own.');
+        Assert.AreEqual(-1.25, PostedTotal, 'The payments together should come to the deduction amount.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        // [THEN] Every part, and every record above it, is marked posted with nothing remaining
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, FirstSubPartId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the first part of the second split');
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, SecondSubPartId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the second part of the second split');
+        FindSplitPart(AlvysDeduction, SiblingId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the part of the first split');
+        AssertPosted(PartEntryNo, 'the part that was split again');
+        AssertPosted(AlvysDeduction."Entry No.", 'the deduction');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure FourSplitsDeepPayTheInvoiceALinePerLeaf()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo, CustomerNo : Code[20];
+        LeafIds: List of [Text];
+        SplitEntryNos: List of [Integer];
+        SplitId, LeafId : Text;
+        EntryNo, Depth, LedgerWatermark, PaymentCount : Integer;
+        RemainingBefore, PostedTotal : Decimal;
+        WasAutoPost: Boolean;
+    begin
+        // [SCENARIO] The same four splits deep: five parts were settled, so five lines are written
+        // and five payments posted, and the four records Alvys split along the way pay nothing
+        // themselves but end up marked posted.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(false);
+
+        // [GIVEN] A deduction of -1.25 split four times over, leaving a -0.25 part behind each time
+        InvoiceNo := OpenPostedInvoiceNo();
+        CustomerNo := BillToCustomerNo(InvoiceNo);
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        for Depth := 1 to 4 do begin
+            LeafId := Format(CreateGuid());
+            LeafIds.Add(LeafId);
+            SplitId := Format(CreateGuid());
+            Clear(Items);
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
+            AddSearchItem(Items, SplitId, AlvysDeduction."Group Id", -1.25 + (Depth * 0.25), false);
+            AddOpenLeaves(Items, AlvysDeduction."Group Id", LeafIds, LeafId);
+            AlvysSettlementPoll.RefreshFromSearch(Items);
+            FindDeduction(SplitId, SplitPart);
+            SplitEntryNos.Add(SplitPart."Entry No.");
+        end;
+        LeafIds.Add(SplitId);
+
+        // [GIVEN] Alvys settles every one of the five parts
+        Clear(Items);
+        foreach LeafId in LeafIds do
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [WHEN] The parts are applied one at a time, the way the poll reaches them
+
+        // [THEN] Each one takes its own amount off what the deduction has left to apply, and off
+        // every part it was split out of on the way up
+        ApplyLeavesInTurn(AlvysDeduction."Entry No.", LeafIds, SplitEntryNos);
+        Assert.AreEqual(0, SettledUnappliedCount(AlvysDeduction."Group Id"), 'The poll should have nothing left to apply.');
+
+        // [THEN] Five lines were written, one per settled part, and none for the records that were
+        // split
+        Assert.AreEqual(5, SettlementLineCount(), 'Each settled part should have a line of its own in the payment journal.');
+        foreach LeafId in LeafIds do begin
+            FindDeduction(LeafId, Leaf);
+            AssertSettlementLine(Leaf.Id, -0.25, InvoiceNo, CustomerNo);
+        end;
+        AssertNoSettlementLine(AlvysDeduction.Id, 'the deduction that was split');
+        foreach EntryNo in SplitEntryNos do begin
+            SplitPart.Get(EntryNo);
+            if SplitPart."Split in Alvys" then
+                AssertNoSettlementLine(SplitPart.Id, 'a part that was split again');
+        end;
+
+        // [WHEN] The batch is posted
+        LedgerWatermark := LastCustLedgerEntryNo();
+        PostSettlementBatch();
+
+        // [THEN] The journal is empty and five payments were posted, together paying the deduction
+        Assert.AreEqual(0, SettlementLineCount(), 'Posting should leave no settlement lines behind.');
+        PostedTotal := PostedPaymentTotal(CustomerNo, LedgerWatermark, PaymentCount);
+        Assert.AreEqual(5, PaymentCount, 'Each part should have posted as a payment of its own.');
+        Assert.AreEqual(-1.25, PostedTotal, 'The payments together should come to the deduction amount.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        // [THEN] Every part and every level above it is marked posted with nothing remaining
+        foreach LeafId in LeafIds do begin
+            FindDeduction(LeafId, Leaf);
+            AssertPosted(Leaf."Entry No.", StrSubstNo('part %1', LeafId));
+        end;
+        foreach EntryNo in SplitEntryNos do
+            AssertPosted(EntryNo, 'a part that was split again');
+        AssertPosted(AlvysDeduction."Entry No.", 'the deduction');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SplitOfASplitPostsEachPartAsItIsAppliedWhenAutoPosting()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo, CustomerNo : Code[20];
+        PartId, SiblingId, FirstSubPartId, SecondSubPartId : Text;
+        PartEntryNo, LedgerWatermark, PaymentCount : Integer;
+        RemainingBefore, PostedTotal : Decimal;
+        WasAutoPost: Boolean;
+    begin
+        // [SCENARIO] The same chain with the setup posting settlements itself: each part is posted as
+        // it is applied, so nothing is left in the journal for anyone to post by hand.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(true);
+
+        // [GIVEN] A deduction of -1.25 split into -0.75 and -0.50, the -0.75 split again into -0.50
+        // and -0.25, and every part paid in Alvys
+        InvoiceNo := OpenPostedInvoiceNo();
+        CustomerNo := BillToCustomerNo(InvoiceNo);
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        PartId := Format(CreateGuid());
+        SiblingId := Format(CreateGuid());
+        FirstSubPartId := Format(CreateGuid());
+        SecondSubPartId := Format(CreateGuid());
+
+        AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        FindSplitPart(AlvysDeduction, PartId, SplitPart);
+        PartEntryNo := SplitPart."Entry No.";
+
+        Clear(Items);
+        AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, true);
+        AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, true);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [WHEN] The poll applies everything it has to apply
+        LedgerWatermark := LastCustLedgerEntryNo();
+        ApplyEverythingSettled(AlvysDeduction."Group Id");
+
+        // [THEN] Nothing was left in the journal, and each part posted as its own payment
+        Assert.AreEqual(0, SettlementLineCount(), 'Auto-posting should leave no settlement lines behind.');
+        PostedTotal := PostedPaymentTotal(CustomerNo, LedgerWatermark, PaymentCount);
+        Assert.AreEqual(3, PaymentCount, 'Each part should have posted as a payment of its own.');
+        Assert.AreEqual(-1.25, PostedTotal, 'The payments together should come to the deduction amount.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        // [THEN] Every part, and every record above it, is applied and posted with nothing remaining
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, FirstSubPartId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the first part of the second split');
+        SplitPart.Get(PartEntryNo);
+        FindSplitPart(SplitPart, SecondSubPartId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the second part of the second split');
+        FindSplitPart(AlvysDeduction, SiblingId, Leaf);
+        AssertPosted(Leaf."Entry No.", 'the part of the first split');
+        AssertPosted(PartEntryNo, 'the part that was split again');
+        AssertPosted(AlvysDeduction."Entry No.", 'the deduction');
+
+        // [THEN] The records Alvys split paid nothing themselves
+        AssertNoSettlementLine(AlvysDeduction.Id, 'the deduction that was split');
+        SplitPart.Get(PartEntryNo);
+        AssertNoSettlementLine(SplitPart.Id, 'the part that was split again');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure FourSplitsDeepPostEachLeafAsItIsAppliedWhenAutoPosting()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNo, CustomerNo : Code[20];
+        LeafIds: List of [Text];
+        SplitEntryNos: List of [Integer];
+        SplitId, LeafId : Text;
+        EntryNo, Depth, LedgerWatermark, PaymentCount : Integer;
+        RemainingBefore, PostedTotal : Decimal;
+        WasAutoPost: Boolean;
+    begin
+        // [SCENARIO] Four splits deep with the setup posting settlements itself: the five parts post
+        // as they are applied, and the four records Alvys split end up posted behind them.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(true);
+
+        // [GIVEN] A deduction of -1.25 split four times over, every part settled in Alvys
+        InvoiceNo := OpenPostedInvoiceNo();
+        CustomerNo := BillToCustomerNo(InvoiceNo);
+        RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        for Depth := 1 to 4 do begin
+            LeafId := Format(CreateGuid());
+            LeafIds.Add(LeafId);
+            SplitId := Format(CreateGuid());
+            Clear(Items);
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
+            AddSearchItem(Items, SplitId, AlvysDeduction."Group Id", -1.25 + (Depth * 0.25), false);
+            AddOpenLeaves(Items, AlvysDeduction."Group Id", LeafIds, LeafId);
+            AlvysSettlementPoll.RefreshFromSearch(Items);
+            FindDeduction(SplitId, SplitPart);
+            SplitEntryNos.Add(SplitPart."Entry No.");
+        end;
+        LeafIds.Add(SplitId);
+
+        Clear(Items);
+        foreach LeafId in LeafIds do
+            AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, true);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [WHEN] The parts are applied one at a time, the way the poll reaches them
+
+        // [THEN] Each one takes its own amount off what the deduction has left to apply, and off
+        // every part it was split out of on the way up, with the posting on each one changing none
+        // of it
+        LedgerWatermark := LastCustLedgerEntryNo();
+        ApplyLeavesInTurn(AlvysDeduction."Entry No.", LeafIds, SplitEntryNos);
+        Assert.AreEqual(0, SettledUnappliedCount(AlvysDeduction."Group Id"), 'The poll should have nothing left to apply.');
+
+        // [THEN] Nothing was left in the journal, and each part posted as its own payment
+        Assert.AreEqual(0, SettlementLineCount(), 'Auto-posting should leave no settlement lines behind.');
+        PostedTotal := PostedPaymentTotal(CustomerNo, LedgerWatermark, PaymentCount);
+        Assert.AreEqual(5, PaymentCount, 'Each part should have posted as a payment of its own.');
+        Assert.AreEqual(-1.25, PostedTotal, 'The payments together should come to the deduction amount.');
+        Assert.AreEqual(RemainingBefore - 1.25, InvoiceRemainingAmount(InvoiceNo), 'The invoice should be paid down by the deduction once over.');
+
+        // [THEN] Every part and every level above it is posted, and the split records paid nothing
+        foreach LeafId in LeafIds do begin
+            FindDeduction(LeafId, Leaf);
+            AssertPosted(Leaf."Entry No.", StrSubstNo('part %1', LeafId));
+        end;
+        foreach EntryNo in SplitEntryNos do begin
+            AssertPosted(EntryNo, 'a part that was split again');
+            SplitPart.Get(EntryNo);
+            if SplitPart."Split in Alvys" then
+                AssertNoSettlementLine(SplitPart.Id, 'a part that was split again');
+        end;
+        AssertPosted(AlvysDeduction."Entry No.", 'the deduction');
+        AssertNoSettlementLine(AlvysDeduction.Id, 'the deduction that was split');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    /// <summary>
+    /// Applies the parts of a four-deep chain one at a time, checking after each what is left to
+    /// apply on the part itself, on every part it was split out of, and on the deduction Business
+    /// Central raised. The parts are all -0.25 of a -1.25 deduction, so the deduction comes down a
+    /// quarter at a time and each level comes down with whichever of its own parts was paid.
+    /// </summary>
+    local procedure ApplyLeavesInTurn(DeductionEntryNo: Integer; var LeafIds: List of [Text]; var SplitEntryNos: List of [Integer])
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        LeafId: Text;
+        Applied, Level : Integer;
+    begin
+        for Applied := 1 to LeafIds.Count() do begin
+            LeafId := LeafIds.Get(Applied);
+            FindDeduction(LeafId, Leaf);
+            Assert.AreEqual(-0.25, Leaf."Remaining Amount", StrSubstNo('Part %1 should have its whole amount left to apply before it is applied.', Applied));
+            AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+
+            FindDeduction(LeafId, Leaf);
+            Assert.AreEqual(0, Leaf."Remaining Amount", StrSubstNo('Part %1 should have nothing left to apply once it is applied.', Applied));
+
+            for Level := 1 to SplitEntryNos.Count() do begin
+                SplitPart.Get(SplitEntryNos.Get(Level));
+                Assert.AreEqual(ExpectedSplitRemaining(Level, Applied, LeafIds.Count()), SplitPart."Remaining Amount",
+                    StrSubstNo('With %1 of the %2 parts applied, the part split at level %3 should have this much left to apply.', Applied, LeafIds.Count(), Level));
+            end;
+
+            AlvysDeduction.Get(DeductionEntryNo);
+            Assert.AreEqual(-0.25 * (LeafIds.Count() - Applied), AlvysDeduction."Remaining Amount",
+                StrSubstNo('With %1 of the %2 parts applied, the deduction should have the rest left to apply.', Applied, LeafIds.Count()));
+            Assert.AreEqual(Applied = LeafIds.Count(), AlvysDeduction."Settlement Applied",
+                StrSubstNo('The deduction should be marked applied only once all %1 parts are.', LeafIds.Count()));
+        end;
+    end;
+
+    /// <summary>
+    /// What the part split at the given level still has to apply. Each split left one part behind
+    /// and carried the rest into the next one, so the level holds the parts below it: the ones the
+    /// splits after it left, plus the last split's own remainder. They are applied in the order they
+    /// were split off, so the first Level of them are not under this level at all.
+    /// </summary>
+    local procedure ExpectedSplitRemaining(Level: Integer; Applied: Integer; LeafCount: Integer): Decimal
+    var
+        PartsBelow, PartsApplied : Integer;
+    begin
+        PartsBelow := LeafCount - Level;
+        PartsApplied := Applied - Level;
+        if PartsApplied < 0 then
+            PartsApplied := 0;
+        exit(-0.25 * (PartsBelow - PartsApplied));
+    end;
+
+    /// <summary>
+    /// How many deductions of one group the poll would still apply, so a run can say it left
+    /// nothing behind.
+    /// </summary>
+    local procedure SettledUnappliedCount(GroupId: Text): Integer
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.SetRange("Group Id", CopyStr(GroupId, 1, MaxStrLen(AlvysDeduction."Group Id")));
+        AlvysDeduction.SetRange("Is Paid", true);
+        AlvysDeduction.SetRange("Settlement Applied", false);
+        AlvysDeduction.SetRange("Split in Alvys", false);
+        AlvysDeduction.SetFilter("Posted Document No.", '<>%1', '');
+        exit(AlvysDeduction.Count());
+    end;
+
+    /// <summary>
+    /// Applies every deduction of one group the poll would apply, the way a scheduled run reaches
+    /// them: paid, not applied yet, and not one Alvys split into parts of its own. Scoped to the
+    /// group so a run picks up its own chain only -- the company holds deductions from earlier runs
+    /// that are waiting on invoices that no longer exist.
+    /// </summary>
+    local procedure ApplyEverythingSettled(GroupId: Text)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        EntryNos: List of [Integer];
+        EntryNo: Integer;
+    begin
+        AlvysDeduction.SetRange("Group Id", CopyStr(GroupId, 1, MaxStrLen(AlvysDeduction."Group Id")));
+        AlvysDeduction.SetRange("Is Paid", true);
+        AlvysDeduction.SetRange("Settlement Applied", false);
+        AlvysDeduction.SetRange("Split in Alvys", false);
+        AlvysDeduction.SetFilter("Posted Document No.", '<>%1', '');
+        if AlvysDeduction.FindSet() then
+            repeat
+                EntryNos.Add(AlvysDeduction."Entry No.");
+            until AlvysDeduction.Next() = 0;
+
+        foreach EntryNo in EntryNos do begin
+            AlvysDeduction.Get(EntryNo);
+            AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+        end;
+    end;
+
+    /// <summary>
+    /// Checks the line the settlement wrote for one deduction: a customer payment for the settled
+    /// amount, applied to the invoice the deduction was raised against and balanced against the
+    /// account the setup names.
+    /// </summary>
+    local procedure AssertSettlementLine(DeductionId: Text; ExpectedAmount: Decimal; InvoiceNo: Code[20]; CustomerNo: Code[20])
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        GenJnlLine: Record "Gen. Journal Line";
+    begin
+        AlvysSetup.Get();
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", CopyStr(DeductionId, 1, MaxStrLen(GenJnlLine."BAASI Alvys Deduction Id")));
+        Assert.AreEqual(1, GenJnlLine.Count(), StrSubstNo('Deduction %1 should have written a single journal line.', DeductionId));
+        GenJnlLine.FindFirst();
+        Assert.AreEqual(AlvysSetup."Payment Journal Template", GenJnlLine."Journal Template Name", 'The line should be in the journal the setup names.');
+        Assert.AreEqual(AlvysSetup."Payment Journal Batch", GenJnlLine."Journal Batch Name", 'The line should be in the batch the setup names.');
+        Assert.AreEqual(GenJnlLine."Document Type"::Payment, GenJnlLine."Document Type", 'A settlement should be written as a payment.');
+        Assert.AreEqual(GenJnlLine."Account Type"::Customer, GenJnlLine."Account Type", 'A settlement should be written against the customer.');
+        Assert.AreEqual(CustomerNo, GenJnlLine."Account No.", 'The line should name the customer the invoice was billed to.');
+        Assert.AreEqual(GenJnlLine."Bal. Account Type"::"G/L Account", GenJnlLine."Bal. Account Type", 'The balancing side should be a G/L account.');
+        Assert.AreEqual(AlvysSetup."Bal. Account No.", GenJnlLine."Bal. Account No.", 'The balancing account should be the one the setup names.');
+        Assert.AreEqual(ExpectedAmount, GenJnlLine.Amount, StrSubstNo('The line for deduction %1 should carry its own amount.', DeductionId));
+        Assert.AreEqual(GenJnlLine."Applies-to Doc. Type"::Invoice, GenJnlLine."Applies-to Doc. Type", 'The payment should be applied to an invoice.');
+        Assert.AreEqual(InvoiceNo, GenJnlLine."Applies-to Doc. No.", 'The payment should be applied to the invoice the deduction was raised against.');
+        Assert.AreEqual(WorkDate(), GenJnlLine."Posting Date", 'A settlement posts under the work date of the run that found it.');
+        Assert.AreNotEqual('', GenJnlLine."Document No.", 'The line should have taken a document number from the batch.');
+    end;
+
+    local procedure AssertNoSettlementLine(DeductionId: Text; What: Text)
+    var
+        GenJnlLine: Record "Gen. Journal Line";
+    begin
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", CopyStr(DeductionId, 1, MaxStrLen(GenJnlLine."BAASI Alvys Deduction Id")));
+        Assert.IsTrue(GenJnlLine.IsEmpty(), StrSubstNo('No journal line should be written for %1.', What));
+    end;
+
+    local procedure AssertApplied(EntryNo: Integer; What: Text)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.Get(EntryNo);
+        Assert.IsTrue(AlvysDeduction."Is Paid", StrSubstNo('%1 should be marked paid.', What));
+        Assert.IsTrue(AlvysDeduction."Settlement Applied", StrSubstNo('%1 should be marked applied.', What));
+        Assert.AreNotEqual(0DT, AlvysDeduction."Settlement Applied At", StrSubstNo('%1 should record when it was applied.', What));
+        Assert.AreEqual(0, AlvysDeduction."Remaining Amount", StrSubstNo('%1 should have nothing remaining.', What));
+    end;
+
+    local procedure AssertPosted(EntryNo: Integer; What: Text)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AssertApplied(EntryNo, What);
+        AlvysDeduction.Get(EntryNo);
+        Assert.IsTrue(AlvysDeduction."Settlement Posted", StrSubstNo('%1 should be marked posted.', What));
+        Assert.AreNotEqual(0DT, AlvysDeduction."Posted DateTime", StrSubstNo('%1 should record when it was posted.', What));
+    end;
+
+    local procedure SettlementLineCount(): Integer
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        GenJnlLine: Record "Gen. Journal Line";
+    begin
+        AlvysSetup.Get();
+        GenJnlLine.SetRange("Journal Template Name", AlvysSetup."Payment Journal Template");
+        GenJnlLine.SetRange("Journal Batch Name", AlvysSetup."Payment Journal Batch");
+        exit(GenJnlLine.Count());
+    end;
+
+    /// <summary>
+    /// Sets auto-posting of settlements and returns what it was, so the caller can put the
+    /// company's own setting back.
+    /// </summary>
+    local procedure SetAutoPostDeductions(AutoPost: Boolean) WasAutoPost: Boolean
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+    begin
+        AlvysSetup.Get();
+        WasAutoPost := AlvysSetup."Auto-Post Deductions";
+        if WasAutoPost = AutoPost then
+            exit;
+        AlvysSetup."Auto-Post Deductions" := AutoPost;
+        AlvysSetup.Modify();
+    end;
+
+    local procedure LastCustLedgerEntryNo(): Integer
+    var
+        CustLedgEntry: Record "Cust. Ledger Entry";
+    begin
+        if CustLedgEntry.FindLast() then
+            exit(CustLedgEntry."Entry No.");
+        exit(0);
+    end;
+
+    /// <summary>
+    /// What the payments posted since the watermark come to, and how many there were, so a run can
+    /// tell its own postings from whatever the company already had.
+    /// </summary>
+    local procedure PostedPaymentTotal(CustomerNo: Code[20]; AfterEntryNo: Integer; var PaymentCount: Integer) Total: Decimal
+    var
+        CustLedgEntry: Record "Cust. Ledger Entry";
+    begin
+        CustLedgEntry.SetRange("Customer No.", CustomerNo);
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Payment);
+        CustLedgEntry.SetFilter("Entry No.", '>%1', AfterEntryNo);
+        if CustLedgEntry.FindSet() then
+            repeat
+                CustLedgEntry.CalcFields(Amount);
+                Total += CustLedgEntry.Amount;
+                PaymentCount += 1;
+            until CustLedgEntry.Next() = 0;
+    end;
+
     /// <summary>
     /// The leaves earlier splits left behind. A search returns everything Alvys still holds, so a
     /// part that was not touched by the latest split has to keep coming back with it.
