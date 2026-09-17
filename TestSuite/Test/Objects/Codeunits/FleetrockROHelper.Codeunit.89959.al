@@ -108,13 +108,18 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
     /// "response" array, failing the test if Fleetrock reports an error.
     /// </summary>
     procedure PostToFleetrock(Endpoint: Text; var JsonBody: JsonObject) ResponseObj: JsonObject
+    begin
+        ResponseObj := PostToFleetrock(Endpoint, JsonBody, false);
+    end;
+
+    procedure PostToFleetrock(Endpoint: Text; var JsonBody: JsonObject; UseVendorAccount: Boolean) ResponseObj: JsonObject
     var
         ResponseArray: JsonArray;
         JTkn: JsonToken;
     begin
         GetSetup();
         ResponseArray := RestAPIMgt.GetResponseAsJsonArray(
-            StrSubstNo('%1/API/%2?token=%3', FleetrockSetup."Integration URL", Endpoint, FleetrockMgt.CheckToGetAPIToken()),
+            StrSubstNo('%1/API/%2?token=%3', FleetrockSetup."Integration URL", Endpoint, FleetrockMgt.CheckToGetAPIToken(UseVendorAccount)),
             'response', 'POST', JsonBody);
         Assert.AreEqual(1, ResponseArray.Count(), StrSubstNo('%1 should return one response entry.', Endpoint));
         ResponseArray.Get(0, JTkn);
