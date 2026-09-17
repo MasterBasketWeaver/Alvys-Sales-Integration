@@ -108,6 +108,33 @@ page 89956 "BAASIT Alvys E2E API"
     end;
 
     /// <summary>
+    /// Creates one busy repair order in Fleetrock -- eight tasks of three parts each -- imports it
+    /// and posts it, for looking at in Business Central rather than for a test. What it produced is
+    /// read back off the entity, so it lands in the same fields a seeded chain uses.
+    /// </summary>
+    [ServiceEnabled]
+    procedure seedDetailedRepairOrder(var ActionContext: WebServiceActionContext)
+    var
+        E2ERun: Record "BAASIT E2E Run";
+        DetailedRepairOrder: Codeunit "BAASIT Detailed Repair Order";
+        ROId: Text;
+        InvoiceNo, PostedInvoiceNo : Code[20];
+    begin
+        DetailedRepairOrder.Create(8, 3, ROId, InvoiceNo, PostedInvoiceNo);
+
+        E2ERun.GetSingleton();
+        E2ERun."Repair Order Id" := CopyStr(ROId, 1, MaxStrLen(E2ERun."Repair Order Id"));
+        E2ERun."Sales Invoice No." := InvoiceNo;
+        E2ERun."Posted Invoice No." := PostedInvoiceNo;
+        E2ERun."Seeded At" := CurrentDateTime();
+        E2ERun.Modify();
+        Commit();
+
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
     /// Clears what earlier chains left behind so a fresh one starts clean: the run singleton, and
     /// the settlement lines sitting unposted in the Alvys payment journal.
     ///

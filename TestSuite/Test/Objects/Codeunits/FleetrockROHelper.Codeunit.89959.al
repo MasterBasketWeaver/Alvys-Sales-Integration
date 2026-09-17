@@ -47,6 +47,98 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
     end;
 
     /// <summary>
+    /// Creates a repair order with a task per repair and several parts on each. Every task and
+    /// every part becomes a line on the imported sales invoice, so this is how a busy repair order
+    /// is produced for inspection.
+    ///
+    /// The cause and correction codes AddRO takes are validated against Fleetrock's own code lists
+    /// and refused when they are not in them, so the detail here is in the fields it takes free:
+    /// the system code, which is what the invoice line is described by, and the complaint.
+    ///
+    /// Labor is 2h at $75.00 a task and parts are 2 at $12.50 each, so the grand total is
+    /// TaskCount * $150.00 plus PartCount * $25.00. AddRO drops an odometer reading, a cost centre
+    /// and additional charges on the way in, so they are not sent.
+    /// </summary>
+    procedure CreateDetailedRepairOrder(UnitVin: Text; TaskCount: Integer; PartsPerTask: Integer) ROId: Text
+    var
+        JsonBody, ROJson, TaskJson, PartJson, ResponseObj : JsonObject;
+        ROArray, TaskArray, PartArray : JsonArray;
+        TaskNo, PartNo : Integer;
+    begin
+        GetSetup();
+
+        for TaskNo := 1 to TaskCount do begin
+            Clear(TaskJson);
+            Clear(PartArray);
+            for PartNo := 1 to PartsPerTask do begin
+                Clear(PartJson);
+                PartJson.Add('part_number', StrSubstNo('BCTEST-P%1-%2', TaskNo, PartNo));
+                PartJson.Add('part_description', StrSubstNo('%1 (task %2, part %3)', PartDescription(PartNo), TaskNo, PartNo));
+                PartJson.Add('part_type', 'Part');
+                PartJson.Add('part_quantity', '2');
+                PartJson.Add('part_price', '12.50');
+                PartJson.Add('part_subtotal', '25.00');
+                PartJson.Add('part_location', StrSubstNo('BIN-%1', TaskNo));
+                PartArray.Add(PartJson);
+            end;
+
+            TaskJson.Add('labor_type', 'Repair');
+            TaskJson.Add('labor_system_code', StrSubstNo('%1 (task %2)', TaskDescription(TaskNo), TaskNo));
+            TaskJson.Add('labor_complaint', StrSubstNo('Task %1: %2 reported by the driver on the pre-trip inspection.', TaskNo, TaskDescription(TaskNo)));
+            TaskJson.Add('labor_hours', '2');
+            TaskJson.Add('labor_hourly_rate', '75.00');
+            TaskJson.Add('labor_subtotal', '150.00');
+            TaskJson.Add('parts', PartArray);
+            TaskArray.Add(TaskJson);
+        end;
+
+        ROJson.Add('vin', UnitVin);
+        ROJson.Add('date_started', FormatFleetrockDate(CalcDate('<-2D>', Today())));
+        ROJson.Add('date_finished', FormatFleetrockDate(CalcDate('<-1D>', Today())));
+        ROJson.Add('invoice_number', StrSubstNo('BCTEST-%1', Format(CurrentDateTime(), 0, '<Year4><Month,2><Day,2><Hours24,2><Minutes,2><Seconds,2>')));
+        ROJson.Add('po_number', StrSubstNo('PO-%1', Format(CurrentDateTime(), 0, '<Year4><Month,2><Day,2><Hours24,2><Minutes,2>')));
+        ROJson.Add('engine_hours', '9120');
+        ROJson.Add('notes', StrSubstNo('Created by the BC test app: %1 tasks, %2 parts each, for inspection in Business Central.', TaskCount, PartsPerTask));
+        ROJson.Add('tasks', TaskArray);
+        ROArray.Add(ROJson);
+
+        JsonBody.Add('customer_id', FleetrockSetup.Username);
+        JsonBody.Add('vendor_id', FleetrockSetup."Vendor Username");
+        JsonBody.Add('repair_orders', ROArray);
+
+        ResponseObj := PostToFleetrock('AddRO', JsonBody);
+        ROId := JsonMgt.GetJsonValueAsText(ResponseObj, 'ro_id');
+        Assert.AreNotEqual('', ROId, 'AddRO should return the id of the created repair order.');
+    end;
+
+    local procedure TaskDescription(TaskNo: Integer): Text
+    var
+        Descriptions: List of [Text];
+    begin
+        Descriptions.Add('Engine oil and filter service');
+        Descriptions.Add('Front brake pads and rotors');
+        Descriptions.Add('Air dryer cartridge replacement');
+        Descriptions.Add('Steer tire replacement');
+        Descriptions.Add('Trailer light repair');
+        Descriptions.Add('DPF clean and regeneration');
+        Descriptions.Add('Coolant system service');
+        Descriptions.Add('Fifth wheel lubrication');
+        exit(Descriptions.Get(1 + (TaskNo - 1) mod Descriptions.Count()));
+    end;
+
+    local procedure PartDescription(PartNo: Integer): Text
+    var
+        Descriptions: List of [Text];
+    begin
+        Descriptions.Add('Oil filter');
+        Descriptions.Add('Brake pad set');
+        Descriptions.Add('Air dryer cartridge');
+        Descriptions.Add('Wheel seal');
+        Descriptions.Add('Marker lamp');
+        exit(Descriptions.Get(1 + (PartNo - 1) mod Descriptions.Count()));
+    end;
+
+    /// <summary>
     /// Moves the repair order to Invoiced as of yesterday. The paid date is removed first and the
     /// invoiced date set in a second call, because Fleetrock stores a combined update with an
     /// unpredictable timestamp. Dates are sent date-only and parsed by Fleetrock as US Eastern,
