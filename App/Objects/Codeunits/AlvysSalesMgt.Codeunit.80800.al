@@ -323,6 +323,13 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]; DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; PostedDocNo: Code[20]): Text
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        InsertDeduction(ResponseObj, TruckNumber, DocType, DocNo, PostedDocNo, AlvysDeduction);
+        exit(AlvysDeduction.Id);
+    end;
+
+    local procedure InsertDeduction(var ResponseObj: JsonObject; TruckNumber: Text[50]; DocType: Enum "BAASI Alvys Entry Doc. Type"; DocNo: Code[20]; PostedDocNo: Code[20]; var AlvysDeduction: Record "BAASI Alvys Deduction")
+    var
         AmountObj: JsonObject;
         JsonTkn: JsonToken;
         EntryNo: Integer;
@@ -347,13 +354,70 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysDeduction."Driver Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'DriverId'), 1, MaxStrLen(AlvysDeduction."Driver Id"));
         AlvysDeduction.Date := DT2Date(JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'Date'));
         AlvysDeduction."Is Paid" := JsonMgt.GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
+        AlvysDeduction."Remaining Amount" := AlvysDeduction.Amount;
         AlvysDeduction."Alvys Created At" := JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'CreatedAt');
         AlvysDeduction."Alvys Created By" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'CreatedBy'), 1, MaxStrLen(AlvysDeduction."Created By"));
         AlvysDeduction."Document Type" := DocType;
         AlvysDeduction."Document No." := DocNo;
         AlvysDeduction."Posted Document No." := PostedDocNo;
         AlvysDeduction.Insert(true);
-        exit(AlvysDeduction.Id);
+    end;
+
+    /// <summary>
+    /// Logs one part of a deduction Alvys split, as a deduction in its own right pointing back at
+    /// the one it was split from. The part carries the split deduction's document, so it can be
+    /// applied to the same posted invoice, and everything else comes from Alvys' own record of it.
+    /// </summary>
+    internal procedure InsertSplitPart(var SplitDeduction: Record "BAASI Alvys Deduction"; var ItemObj: JsonObject; var SplitPart: Record "BAASI Alvys Deduction")
+    begin
+        InsertDeduction(ItemObj, SplitDeduction."Truck Number", SplitDeduction."Document Type", SplitDeduction."Document No.", SplitDeduction."Posted Document No.", SplitPart);
+        SplitPart."Split From Entry No." := SplitDeduction."Entry No.";
+        SplitPart.Modify(true);
+    end;
+
+    /// <summary>
+    /// Carries what has happened to the parts of a split deduction up to the deduction they were
+    /// split from, and on up if that one was itself a part of an earlier split. A split deduction is
+    /// not settled itself -- Alvys deleted it -- so what it reports is what its parts report
+    /// together: paid once every part is paid, applied once every part is applied, and remaining
+    /// whatever its parts have left to apply.
+    /// </summary>
+    internal procedure UpdateSplitDeduction(SplitPartEntryNo: Integer)
+    var
+        SplitDeduction, SplitPart, Sibling : Record "BAASI Alvys Deduction";
+        RemainingAmount: Decimal;
+        AllPaid, AllApplied, AllPosted : Boolean;
+    begin
+        if not SplitPart.Get(SplitPartEntryNo) then
+            exit;
+        if SplitPart."Split From Entry No." = 0 then
+            exit;
+        if not SplitDeduction.Get(SplitPart."Split From Entry No.") then
+            exit;
+
+        AllPaid := true;
+        AllApplied := true;
+        AllPosted := true;
+        Sibling.SetRange("Split From Entry No.", SplitDeduction."Entry No.");
+        if Sibling.FindSet() then
+            repeat
+                RemainingAmount += Sibling."Remaining Amount";
+                AllPaid := AllPaid and Sibling."Is Paid";
+                AllApplied := AllApplied and Sibling."Settlement Applied";
+                AllPosted := AllPosted and Sibling."Settlement Posted";
+            until Sibling.Next() = 0;
+
+        SplitDeduction."Is Paid" := AllPaid;
+        SplitDeduction."Remaining Amount" := RemainingAmount;
+        SplitDeduction."Settlement Applied" := AllApplied;
+        if AllApplied and (SplitDeduction."Settlement Applied At" = 0DT) then
+            SplitDeduction."Settlement Applied At" := CurrentDateTime();
+        SplitDeduction."Settlement Posted" := AllPosted;
+        if AllPosted and (SplitDeduction."Posted DateTime" = 0DT) then
+            SplitDeduction."Posted DateTime" := CurrentDateTime();
+        SplitDeduction.Modify(true);
+
+        UpdateSplitDeduction(SplitDeduction."Entry No.");
     end;
 
 
@@ -704,7 +768,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         InsertPaymentJournalLine(GenJnlLine, AlvysSalesSetup, DocumentNo, Amount, SettlementDate, AlvysDeduction."Id");
         AlvysDeduction.Validate("Settlement Applied", true);
         AlvysDeduction.Validate("Settlement Applied At", CurrentDateTime());
+        AlvysDeduction.Validate("Remaining Amount", 0);
         AlvysDeduction.Modify(true);
+        UpdateSplitDeduction(AlvysDeduction."Entry No.");
         if not AlvysSalesSetup."Auto-Post Deductions" then
             exit('');
 
@@ -728,6 +794,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
                 AlvysDeduction.Validate("Settlement Posted", true);
                 AlvysDeduction.Validate("Posted DateTime", CurrentDateTime());
                 AlvysDeduction.Modify(true);
+                UpdateSplitDeduction(AlvysDeduction."Entry No.");
             until AlvysDeduction.Next() = 0;
     end;
 

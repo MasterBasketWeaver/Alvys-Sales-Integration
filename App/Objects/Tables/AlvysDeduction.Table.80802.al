@@ -113,6 +113,25 @@ table 80802 "BAASI Alvys Deduction"
             Editable = false;
             Tooltip = 'The user who created the deduction in Alvys.';
         }
+        // Alvys pays a deduction off in parts by splitting it: the original is deleted there and
+        // replaced by parts under new Ids that keep its Group Id. The original is kept here, and
+        // each part is logged as its own deduction pointing back at it.
+        field(34; "Split in Alvys"; Boolean)
+        {
+            Editable = false;
+            Tooltip = 'Whether the deduction has been split in Alvys. A split deduction no longer exists in Alvys and is not settled itself; its parts are logged as deductions of their own and carry the settlement.';
+        }
+        field(33; "Remaining Amount"; Decimal)
+        {
+            Editable = false;
+            Tooltip = 'How much of the deduction has not been written to the payment journal yet. For a deduction split in Alvys this is the total of the parts still to be applied.';
+        }
+        field(35; "Split From Entry No."; Integer)
+        {
+            Editable = false;
+            TableRelation = "BAASI Alvys Deduction"."Entry No.";
+            Tooltip = 'The deduction this one was split from in Alvys. Blank for a deduction Business Central raised itself.';
+        }
     }
 
     keys
@@ -127,5 +146,13 @@ table 80802 "BAASI Alvys Deduction"
         key(K4; "SystemCreatedAt") { }
         // A posted settlement journal line carries only the deduction Id back to its deduction.
         key(K5; Id) { }
+        key(K6; "Split From Entry No.") { }
     }
+
+    procedure SplitParts(var SplitPart: Record "BAASI Alvys Deduction"): Boolean
+    begin
+        SplitPart.Reset();
+        SplitPart.SetRange("Split From Entry No.", "Entry No.");
+        exit(SplitPart.FindSet());
+    end;
 }

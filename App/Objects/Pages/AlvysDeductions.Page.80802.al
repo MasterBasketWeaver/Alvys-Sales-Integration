@@ -26,6 +26,18 @@ page 80802 "BAASI Alvys Deductions"
                 field(Description; Rec.Description) { }
                 field(Category; Rec.Category) { }
                 field(Amount; Rec.Amount) { }
+                field("Remaining Amount"; Rec."Remaining Amount") { }
+                field("Split in Alvys"; Rec."Split in Alvys") { }
+                field("Split From Entry No."; Rec."Split From Entry No.")
+                {
+                    trigger OnDrillDown()
+                    var
+                        SplitDeduction: Record "BAASI Alvys Deduction";
+                    begin
+                        if SplitDeduction.Get(Rec."Split From Entry No.") then
+                            Page.Run(Page::"BAASI Alvys Deductions", SplitDeduction);
+                    end;
+                }
                 field("Currency Id"; Rec."Currency Id") { }
                 field("Truck Id"; Rec."Truck Id") { }
                 field("Truck Number"; Rec."Truck Number") { }
@@ -92,6 +104,8 @@ page 80802 "BAASI Alvys Deductions"
                     NewLine, IsHandled : Boolean;
                 begin
                     Rec.TestField("Is Paid", true);
+                    // A split deduction no longer exists in Alvys; its parts carry the settlement.
+                    Rec.TestField("Split in Alvys", false);
                     Rec.TestField("Settlement Posted", false);
                     Rec.TestField("Posted Document No.");
 
