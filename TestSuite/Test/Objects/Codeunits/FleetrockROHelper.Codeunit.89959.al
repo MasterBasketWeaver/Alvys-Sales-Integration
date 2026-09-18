@@ -214,6 +214,32 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
     end;
 
     /// <summary>
+    /// Waits until Fleetrock reports the invoiced date it was just given. SetRepairOrderToInvoiced
+    /// returns as soon as the status flips, but date_invoiced follows a moment later -- and an
+    /// import that reads the order in between stages it with no invoiced date at all, which sends
+    /// the sales invoice to the fallback posting date rather than the date it was invoiced on.
+    /// </summary>
+    procedure WaitForInvoicedDate(ROId: Text)
+    var
+        ROObj: JsonObject;
+        Deadline: DateTime;
+        TimeoutMs, IntervalMs : Integer;
+        InvoicedDate: Text;
+    begin
+        TimeoutMs := 180000;
+        IntervalMs := 5000;
+        Deadline := CurrentDateTime() + TimeoutMs;
+        repeat
+            ROObj := GetRepairOrder(ROId);
+            InvoicedDate := JsonMgt.GetJsonValueAsText(ROObj, 'date_invoiced');
+            if InvoicedDate <> '' then
+                exit;
+            Sleep(IntervalMs);
+        until CurrentDateTime() > Deadline;
+        Error(InvoicedDateNeverArrivedErr, ROId);
+    end;
+
+    /// <summary>
     /// Removes the repair order from Fleetrock once the test is done. Fleetrock refuses to delete
     /// an invoiced order, so the invoiced and finished dates are removed first to walk the status
     /// back. The API rejects removing the started date, so In Progress is as far back as an order
@@ -319,6 +345,7 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
         LoadedSetup: Boolean;
 
         DetailNeverArrivedErr: Label 'Fleetrock repair order %1 still shows %4 of %2 tasks and %5 of %3 parts.', Comment = '%1 = Repair Order Id, %2 = expected tasks, %3 = expected parts, %4 = tasks found, %5 = parts found';
+        InvoicedDateNeverArrivedErr: Label 'Fleetrock repair order %1 still reports no invoiced date.', Comment = '%1 = Repair Order Id';
         UnitLookupFailedErr: Label 'Fleetrock unit lookup failed: %1', Comment = '%1 = the error text';
         UnitNotFoundErr: Label 'No Fleetrock unit was found with unit number %1.', Comment = '%1 = Unit Number';
 }

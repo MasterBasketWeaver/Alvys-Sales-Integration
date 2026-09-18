@@ -32,6 +32,7 @@ codeunit 89966 "BAASIT Detailed Repair Order"
         ROId := ROHelper.CreateDetailedRepairOrder(ROHelper.GetUnitVin(UnitNumber), TaskCount, PartsPerTask);
         ROHelper.WaitForRepairOrderDetail(ROId, TaskCount, PartsPerTask);
         ROHelper.SetRepairOrderToInvoiced(ROId);
+        ROHelper.WaitForInvoicedDate(ROId);
 
         FleetrockSetup.Get();
         OriginalAutoPost := FleetrockSetup."Auto-post Repair Orders";
