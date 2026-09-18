@@ -139,6 +139,69 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
     end;
 
     /// <summary>
+    /// Waits until Fleetrock has every task and part AddRO was given. AddRO returns as soon as the
+    /// repair order exists, and its totals are right immediately, but the tasks and their parts
+    /// appear over the next few seconds -- so an import run straight afterwards sees a short order
+    /// and builds a sales invoice missing lines, with nothing logged as an error anywhere.
+    /// </summary>
+    procedure WaitForRepairOrderDetail(ROId: Text; TaskCount: Integer; PartsPerTask: Integer)
+    var
+        Deadline: DateTime;
+        TimeoutMs, IntervalMs, Tasks, Parts : Integer;
+    begin
+        TimeoutMs := 180000;
+        IntervalMs := 5000;
+        Deadline := CurrentDateTime() + TimeoutMs;
+        repeat
+            CountRepairOrderDetail(ROId, Tasks, Parts);
+            if (Tasks >= TaskCount) and (Parts >= TaskCount * PartsPerTask) then
+                exit;
+            Sleep(IntervalMs);
+        until CurrentDateTime() > Deadline;
+        Error(DetailNeverArrivedErr, ROId, TaskCount, TaskCount * PartsPerTask, Tasks, Parts);
+    end;
+
+    local procedure CountRepairOrderDetail(ROId: Text; var Tasks: Integer; var Parts: Integer)
+    var
+        ROObj, TaskObj : JsonObject;
+        TaskArray: JsonArray;
+        TasksTkn, TaskTkn, PartsTkn : JsonToken;
+    begin
+        Tasks := 0;
+        Parts := 0;
+        ROObj := GetRepairOrder(ROId);
+        if not ROObj.Get('tasks', TasksTkn) then
+            exit;
+        TaskArray := TasksTkn.AsArray();
+        Tasks := TaskArray.Count();
+        foreach TaskTkn in TaskArray do begin
+            TaskObj := TaskTkn.AsObject();
+            if TaskObj.Get('parts', PartsTkn) then
+                Parts += PartsTkn.AsArray().Count();
+        end;
+    end;
+
+    /// <summary>
+    /// Resolves a Fleetrock unit number to the VIN AddRO wants, so a caller can name the truck the
+    /// way Alvys and the tractor code dimension do.
+    /// </summary>
+    procedure GetUnitVin(UnitNumber: Text) Vin: Text
+    var
+        UnitsArray: JsonArray;
+        UnitTkn: JsonToken;
+        UnitObj: JsonObject;
+    begin
+        if not FleetrockMgt.TryToGetUnits(UnitsArray) then
+            Error(UnitLookupFailedErr, GetLastErrorText());
+        foreach UnitTkn in UnitsArray do begin
+            UnitObj := UnitTkn.AsObject();
+            if JsonMgt.GetJsonValueAsText(UnitObj, 'unit_number').ToUpper() = UnitNumber.ToUpper() then
+                exit(JsonMgt.GetJsonValueAsText(UnitObj, 'vin'));
+        end;
+        Error(UnitNotFoundErr, UnitNumber);
+    end;
+
+    /// <summary>
     /// Moves the repair order to Invoiced as of yesterday. The paid date is removed first and the
     /// invoiced date set in a second call, because Fleetrock stores a combined update with an
     /// unpredictable timestamp. Dates are sent date-only and parsed by Fleetrock as US Eastern,
@@ -254,4 +317,8 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
         JsonMgt: Codeunit "FRI Json Mgt.";
         RestAPIMgt: Codeunit "FRI REST API Mgt.";
         LoadedSetup: Boolean;
+
+        DetailNeverArrivedErr: Label 'Fleetrock repair order %1 still shows %4 of %2 tasks and %5 of %3 parts.', Comment = '%1 = Repair Order Id, %2 = expected tasks, %3 = expected parts, %4 = tasks found, %5 = parts found';
+        UnitLookupFailedErr: Label 'Fleetrock unit lookup failed: %1', Comment = '%1 = the error text';
+        UnitNotFoundErr: Label 'No Fleetrock unit was found with unit number %1.', Comment = '%1 = Unit Number';
 }

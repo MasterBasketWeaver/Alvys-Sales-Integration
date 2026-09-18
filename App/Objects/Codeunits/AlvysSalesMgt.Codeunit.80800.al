@@ -938,6 +938,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysEntry."Document No." := DocNo;
         AlvysEntry.URL := CopyStr(URL, 1, MaxStrLen(AlvysEntry.URL));
         AlvysEntry.Method := CopyStr(Method, 1, MaxStrLen(AlvysEntry.Method));
+        AlvysEntry."Deduction Id" := CopyStr(DeductionIdFromURL(URL), 1, MaxStrLen(AlvysEntry."Deduction Id"));
+        if AlvysEntry."Deduction Id" <> '' then
+            SetDocumentFromDeduction(AlvysEntry);
         AlvysEntry.SetRequestBody(RequestBody);
         if LogResponse then
             AlvysEntry.Response := CopyStr(ResponseText, 1, MaxStrLen(AlvysEntry.Response));
@@ -950,6 +953,86 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
 
+
+
+    /// <summary>
+    /// The deduction Id out of a URL that names one, the way deductions/{id} does for a GET or a
+    /// DELETE. Anything else in that position -- deductions/search, deductions/once -- is not an Id,
+    /// so the segment is taken only when it parses as a GUID.
+    /// </summary>
+    local procedure DeductionIdFromURL(URL: Text): Text
+    var
+        DeductionGuid: Guid;
+        Candidate: Text;
+        Position: Integer;
+    begin
+        Position := URL.ToLower().IndexOf(DeductionsPathTok);
+        if Position = 0 then
+            exit('');
+        Candidate := URL.Substring(Position + StrLen(DeductionsPathTok));
+        Candidate := StopAt(Candidate, '/');
+        Candidate := StopAt(Candidate, '?');
+        Candidate := StopAt(Candidate, '#');
+        if Evaluate(DeductionGuid, Candidate) then
+            exit(Candidate);
+    end;
+
+    local procedure StopAt(Value: Text; Separator: Text): Text
+    var
+        Position: Integer;
+    begin
+        Position := Value.IndexOf(Separator);
+        if Position = 0 then
+            exit(Value);
+        exit(CopyStr(Value, 1, Position - 1));
+    end;
+
+    /// <summary>
+    /// Names the document behind a deduction on an entry whose caller could not: a call made about a
+    /// deduction Id alone, such as reading or deleting it, knows nothing of the invoice it came from.
+    /// The logged deduction is what links the two. A caller that named a document itself is left
+    /// alone, the posted invoice is preferred over the document it posted from, and a document that
+    /// no longer exists is not named.
+    /// </summary>
+    local procedure SetDocumentFromDeduction(var AlvysEntry: Record "BAASI Alvys Sales Entry")
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SalesHeader: Record "Sales Header";
+        SalesInvHeader: Record "Sales Invoice Header";
+        SalesDocType: Enum "Sales Document Type";
+    begin
+        if (AlvysEntry."Document Type" <> AlvysEntry."Document Type"::" ") or (AlvysEntry."Document No." <> '') then
+            exit;
+        AlvysDeduction.SetFilter(Id, '@' + AlvysEntry."Deduction Id");
+        if not AlvysDeduction.FindSet() then
+            exit;
+        repeat
+            if SalesInvHeader.Get(AlvysDeduction."Posted Document No.") then begin
+                AlvysEntry."Document Type" := AlvysEntry."Document Type"::"Posted Sales Invoice";
+                AlvysEntry."Document No." := SalesInvHeader."No.";
+                exit;
+            end;
+            if SalesDocumentType(AlvysDeduction."Document Type", SalesDocType) then
+                if SalesHeader.Get(SalesDocType, AlvysDeduction."Document No.") then begin
+                    AlvysEntry."Document Type" := AlvysDeduction."Document Type";
+                    AlvysEntry."Document No." := SalesHeader."No.";
+                    exit;
+                end;
+        until AlvysDeduction.Next() = 0;
+    end;
+
+    local procedure SalesDocumentType(DocType: Enum "BAASI Alvys Entry Doc. Type"; var SalesDocType: Enum "Sales Document Type"): Boolean
+    begin
+        case DocType of
+            DocType::"Sales Order":
+                SalesDocType := SalesDocType::Order;
+            DocType::"Sales Invoice":
+                SalesDocType := SalesDocType::Invoice;
+            else
+                exit(false);
+        end;
+        exit(true);
+    end;
 
 
     [BusinessEvent(false, false)]
@@ -973,6 +1056,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         NoTruckFoundErr: Label 'No Alvys truck was found with truck number %1.', Comment = '%1 = Truck Number';
         MissingTruckNumberErr: Label 'The truck number cannot be blank.';
         TruckIdTok: Label 'TruckId', Locked = true;
+        DeductionsPathTok: Label 'deductions/', Locked = true;
         DriverIdTok: Label 'DriverId', Locked = true;
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';

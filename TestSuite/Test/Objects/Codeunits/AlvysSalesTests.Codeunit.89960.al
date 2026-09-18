@@ -1029,7 +1029,7 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         // sharing its group
         UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
         AddSearchItem(Items, AlvysDeduction.Id, AlvysDeduction."Group Id", AlvysDeduction.Amount, true);
-        AddSearchItem(Items, Format(CreateGuid()), AlvysDeduction."Group Id", -0.75, true);
+        AddSearchItem(Items, AlvysStyleId(), AlvysDeduction."Group Id", -0.75, true);
 
         // [WHEN] The poll reads the search
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1058,8 +1058,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         // [GIVEN] An unpaid deduction of -1.25 Alvys has split into -0.75 paid and -0.50 open
         UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
-        FirstPartId := Format(CreateGuid());
-        SecondPartId := Format(CreateGuid());
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
         AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, true);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
 
@@ -1100,8 +1100,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         // [GIVEN] A split deduction whose parts have been logged
         UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
-        FirstPartId := Format(CreateGuid());
-        SecondPartId := Format(CreateGuid());
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
         AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, false);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1135,8 +1135,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         // [GIVEN] A deduction split into -0.75 and -0.50, with both parts logged
         UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
-        FirstPartId := Format(CreateGuid());
-        SecondPartId := Format(CreateGuid());
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
         AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, false);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1145,8 +1145,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         // [WHEN] Alvys splits the -0.75 part into -0.50 and -0.25, and the poll runs again
         Clear(Items);
-        AddSearchItem(Items, Format(CreateGuid()), AlvysDeduction."Group Id", -0.5, false);
-        AddSearchItem(Items, Format(CreateGuid()), AlvysDeduction."Group Id", -0.25, false);
+        AddSearchItem(Items, AlvysStyleId(), AlvysDeduction."Group Id", -0.5, false);
+        AddSearchItem(Items, AlvysStyleId(), AlvysDeduction."Group Id", -0.25, false);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
         AlvysSettlementPoll.RefreshFromSearch(Items);
 
@@ -1182,8 +1182,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         InvoiceNo := OpenPostedInvoiceNo();
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
-        FirstPartId := Format(CreateGuid());
-        SecondPartId := Format(CreateGuid());
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
         AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, true);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1253,8 +1253,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         // [GIVEN] A split deduction whose parts are both paid and applied
         UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
-        FirstPartId := Format(CreateGuid());
-        SecondPartId := Format(CreateGuid());
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
         AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, true);
         AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, true);
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1297,8 +1297,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         InvoiceNo := OpenPostedInvoiceNo();
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
-        PartId := Format(CreateGuid());
-        SiblingId := Format(CreateGuid());
+        PartId := AlvysStyleId();
+        SiblingId := AlvysStyleId();
         AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
         AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
         AlvysSettlementPoll.RefreshFromSearch(Items);
@@ -1306,8 +1306,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         PartEntryNo := SplitPart."Entry No.";
 
         // [WHEN] Alvys splits the -0.75 part into -0.50 and -0.25
-        FirstSubPartId := Format(CreateGuid());
-        SecondSubPartId := Format(CreateGuid());
+        FirstSubPartId := AlvysStyleId();
+        SecondSubPartId := AlvysStyleId();
         Clear(Items);
         AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, false);
         AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, false);
@@ -1369,6 +1369,283 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     end;
 
     [Test]
+    procedure ASplitLogsOnlyThePartsInItsOwnGroup()
+    var
+        SplitDeduction, OtherDeduction : Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNos: List of [Code[20]];
+        FirstPartId, SecondPartId : Text;
+    begin
+        // [SCENARIO] A split is read out of the group the deduction was in. Another deduction the
+        // same search returns is in a group of its own and has nothing to do with the split, so
+        // nothing of it is logged as a part.
+        Initialize();
+
+        // [GIVEN] Two deductions on two invoices, one of them split into two parts in its own group
+        InvoiceNos := OpenPostedInvoiceNos(2);
+        UnpaidDeduction(InvoiceNos.Get(1), SplitDeduction);
+        UnpaidDeduction(InvoiceNos.Get(2), OtherDeduction);
+        FirstPartId := AlvysStyleId();
+        SecondPartId := AlvysStyleId();
+        AddSearchItem(Items, FirstPartId, SplitDeduction."Group Id", -0.75, true);
+        AddSearchItem(Items, SecondPartId, SplitDeduction."Group Id", -0.5, false);
+        // The other deduction is still there under its own Id, unpaid, in its own group
+        AddSearchItem(Items, OtherDeduction.Id, OtherDeduction."Group Id", OtherDeduction.Amount, false);
+
+        // [WHEN] The poll reads the search
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] The split deduction has exactly its own two parts
+        SplitDeduction.Get(SplitDeduction."Entry No.");
+        Assert.IsTrue(SplitDeduction."Split in Alvys", 'The deduction Alvys no longer returns should be marked split.');
+        Assert.AreEqual(2, SplitPartCount(SplitDeduction), 'Only the two parts in the deduction group should be logged against it.');
+        Assert.AreEqual(1, DeductionRowCount(FirstPartId), 'The first part should be logged once.');
+        Assert.AreEqual(1, DeductionRowCount(SecondPartId), 'The second part should be logged once.');
+
+        // [THEN] The deduction on the other invoice is untouched
+        OtherDeduction.Get(OtherDeduction."Entry No.");
+        Assert.IsFalse(OtherDeduction."Split in Alvys", 'A deduction still returned under its own Id should not be marked split.');
+        Assert.AreEqual(0, OtherDeduction."Split From Entry No.", 'A deduction of its own should not be logged as a part of another.');
+        Assert.AreEqual(0, SplitPartCount(OtherDeduction), 'A deduction that was not split should have no parts.');
+        Assert.AreEqual(1, DeductionRowCount(OtherDeduction.Id), 'A deduction that was not split should still be logged once.');
+
+        CleanUpDeduction(SplitDeduction.Id);
+        CleanUpDeduction(OtherDeduction.Id);
+    end;
+
+    [Test]
+    procedure APartSplitAgainDoesNotLogItsSiblingASecondTime()
+    var
+        AlvysDeduction, SplitPart : Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        PartId, SiblingId, FirstSubPartId, SecondSubPartId : Text;
+    begin
+        // [SCENARIO] Splitting a part again leaves its sibling alone. The sibling is still in the
+        // group and still returned by the search, and it is already logged, so the split being read
+        // must not log it a second time -- a second row is applied a second time and pays the
+        // invoice down twice.
+        Initialize();
+
+        // [GIVEN] A deduction split into two logged parts
+        UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        PartId := AlvysStyleId();
+        SiblingId := AlvysStyleId();
+        AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [WHEN] Alvys splits one part again and the poll runs on a search that still carries the
+        // sibling under its own Id
+        FirstSubPartId := AlvysStyleId();
+        SecondSubPartId := AlvysStyleId();
+        Clear(Items);
+        AddSearchItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, false);
+        AddSearchItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, false);
+        AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] The sibling is logged once and still hangs off the deduction, not off the part
+        Assert.AreEqual(1, DeductionRowCount(SiblingId), 'The sibling should not be logged a second time.');
+        FindSplitPart(AlvysDeduction, SiblingId, SplitPart);
+        Assert.AreEqual(AlvysDeduction."Entry No.", SplitPart."Split From Entry No.", 'The sibling should still point at the deduction it was split from.');
+
+        // [THEN] The part that was split has only the two new parts, and the deduction still two
+        FindDeduction(PartId, SplitPart);
+        Assert.IsTrue(SplitPart."Split in Alvys", 'The part Alvys no longer returns should be marked split.');
+        Assert.AreEqual(2, SplitPartCount(SplitPart), 'Only the two new parts should be logged under the part that was split.');
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(2, SplitPartCount(AlvysDeduction), 'The deduction should still have the two parts of the first split.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure ADeductionSplitIntoManyPartsLogsEveryPartOnce()
+    var
+        AlvysDeduction, SplitPart : Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        PartIds: List of [Text];
+        SubPartIds: List of [Text];
+        PartId: Text;
+        PartNo, SplitNo : Integer;
+    begin
+        // [SCENARIO] Alvys can split a deduction into more than two parts, and split more than one
+        // of those again. Every part is logged once, under the record it came from.
+        Initialize();
+
+        // [GIVEN] A deduction of -1.25 split into five parts of -0.25
+        UnpaidDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        for PartNo := 1 to 5 do begin
+            PartId := AlvysStyleId();
+            PartIds.Add(PartId);
+            AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.25, false);
+        end;
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(5, SplitPartCount(AlvysDeduction), 'All five parts should be logged against the deduction.');
+
+        // [WHEN] Two of those parts are split again, with the poll run after each split.
+        //
+        // A group is flat -- a part carries the group of the deduction it came from and nothing
+        // saying which part it came from -- so the poll attributes the parts it has not seen before
+        // to the record that went missing. One split per run is what that can resolve; two parts
+        // disappearing in the same run cannot be told apart, and everything new would land under
+        // whichever was reached first.
+        for SplitNo := 1 to 2 do begin
+            Clear(Items);
+            for PartNo := 1 to 2 do begin
+                PartId := AlvysStyleId();
+                SubPartIds.Add(PartId);
+                AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.125, false);
+            end;
+            // Everything still standing under its own Id: the parts not split, and the sub-parts of
+            // the split before this one
+            for PartNo := SplitNo + 1 to 5 do
+                AddSearchItem(Items, PartIds.Get(PartNo), AlvysDeduction."Group Id", -0.25, false);
+            foreach PartId in SubPartIds do
+                AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.125, false);
+            AlvysSettlementPoll.RefreshFromSearch(Items);
+        end;
+
+        // [THEN] Each of the two split parts carries the two parts of its own split
+        for PartNo := 1 to 2 do begin
+            FindDeduction(PartIds.Get(PartNo), SplitPart);
+            Assert.IsTrue(SplitPart."Split in Alvys", StrSubstNo('Part %1 should be marked split.', PartNo));
+            Assert.AreEqual(2, SplitPartCount(SplitPart), StrSubstNo('Part %1 should have the two parts of its own split.', PartNo));
+        end;
+
+        // [THEN] The deduction still has its five parts, and every Id is logged exactly once
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(5, SplitPartCount(AlvysDeduction), 'The deduction should keep the five parts of the first split.');
+        foreach PartId in PartIds do
+            Assert.AreEqual(1, DeductionRowCount(PartId), StrSubstNo('Part %1 should be logged once.', PartId));
+        foreach PartId in SubPartIds do
+            Assert.AreEqual(1, DeductionRowCount(PartId), StrSubstNo('Part %1 should be logged once.', PartId));
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SplitsOnSeveralDeductionsArePolledWithoutCrossingOver()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNos: List of [Code[20]];
+        EntryNos: List of [Integer];
+        PartIds: List of [Text];
+        DeductionNo, PartNo : Integer;
+        FirstPartId, SecondPartId : Text;
+    begin
+        // [SCENARIO] Three deductions on three invoices are each split in Alvys before the poll next
+        // runs. One poll reads them all, and each split is logged only from its own group -- the
+        // case a run that reads them one at a time never reaches.
+        Initialize();
+
+        // [GIVEN] Three deductions, each split into two parts in its own group
+        InvoiceNos := OpenPostedInvoiceNos(3);
+        for DeductionNo := 1 to 3 do begin
+            UnpaidDeduction(InvoiceNos.Get(DeductionNo), AlvysDeduction);
+            EntryNos.Add(AlvysDeduction."Entry No.");
+            FirstPartId := AlvysStyleId();
+            SecondPartId := AlvysStyleId();
+            PartIds.Add(FirstPartId);
+            PartIds.Add(SecondPartId);
+            AddSearchItem(Items, FirstPartId, AlvysDeduction."Group Id", -0.75, false);
+            AddSearchItem(Items, SecondPartId, AlvysDeduction."Group Id", -0.5, false);
+        end;
+
+        // [WHEN] One poll reads all three splits together
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] Each deduction has exactly its own two parts, each keeping its group
+        for DeductionNo := 1 to 3 do begin
+            AlvysDeduction.Get(EntryNos.Get(DeductionNo));
+            Assert.IsTrue(AlvysDeduction."Split in Alvys", StrSubstNo('Deduction %1 should be marked split.', DeductionNo));
+            Assert.AreEqual(2, SplitPartCount(AlvysDeduction), StrSubstNo('Deduction %1 should have two parts and nothing from another group.', DeductionNo));
+            Assert.AreEqual(-1.25, AlvysDeduction."Remaining Amount", StrSubstNo('Deduction %1 should have its whole amount remaining.', DeductionNo));
+            FindSplitPart(AlvysDeduction, PartIds.Get((DeductionNo - 1) * 2 + 1), SplitPart);
+            Assert.AreEqual(AlvysDeduction."Group Id", SplitPart."Group Id", 'A part should keep the group of the deduction it came from.');
+            Assert.AreEqual(AlvysDeduction."Posted Document No.", SplitPart."Posted Document No.", 'A part should carry the invoice of the deduction it came from.');
+        end;
+
+        // [THEN] Every part is logged exactly once across all three splits
+        for PartNo := 1 to PartIds.Count() do
+            Assert.AreEqual(1, DeductionRowCount(PartIds.Get(PartNo)), StrSubstNo('Part %1 should be logged once.', PartIds.Get(PartNo)));
+
+        for DeductionNo := 1 to 3 do begin
+            AlvysDeduction.Get(EntryNos.Get(DeductionNo));
+            CleanUpDeduction(AlvysDeduction.Id);
+        end;
+    end;
+
+    [Test]
+    procedure SplitsPolledOneAtATimeLeaveTheEarlierSplitsAlone()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        InvoiceNos: List of [Code[20]];
+        EntryNos: List of [Integer];
+        PartIds: List of [Text];
+        DeductionNo, EarlierNo, PartNo : Integer;
+        FirstPartId, SecondPartId : Text;
+    begin
+        // [SCENARIO] The same three deductions, but split one at a time with the poll run after each
+        // split. A split already read must not be read again off a later search that still carries
+        // its parts, and the deductions not yet split must be left alone.
+        Initialize();
+
+        // [GIVEN] Three deductions on three invoices
+        InvoiceNos := OpenPostedInvoiceNos(3);
+        for DeductionNo := 1 to 3 do begin
+            UnpaidDeduction(InvoiceNos.Get(DeductionNo), AlvysDeduction);
+            EntryNos.Add(AlvysDeduction."Entry No.");
+            PartIds.Add(AlvysStyleId());
+            PartIds.Add(AlvysStyleId());
+        end;
+
+        // [WHEN] Each is split in turn and the poll runs after every split. Every search carries the
+        // parts of the splits before it, and the deductions not yet split under their own Ids.
+        for DeductionNo := 1 to 3 do begin
+            Clear(Items);
+            for EarlierNo := 1 to DeductionNo do begin
+                AlvysDeduction.Get(EntryNos.Get(EarlierNo));
+                AddSearchItem(Items, PartIds.Get((EarlierNo - 1) * 2 + 1), AlvysDeduction."Group Id", -0.75, false);
+                AddSearchItem(Items, PartIds.Get((EarlierNo - 1) * 2 + 2), AlvysDeduction."Group Id", -0.5, false);
+            end;
+            for EarlierNo := DeductionNo + 1 to 3 do begin
+                AlvysDeduction.Get(EntryNos.Get(EarlierNo));
+                AddSearchItem(Items, AlvysDeduction.Id, AlvysDeduction."Group Id", AlvysDeduction.Amount, false);
+            end;
+            AlvysSettlementPoll.RefreshFromSearch(Items);
+
+            // [THEN] Each split read so far still has its own two parts, and nothing more
+            for EarlierNo := 1 to DeductionNo do begin
+                AlvysDeduction.Get(EntryNos.Get(EarlierNo));
+                Assert.IsTrue(AlvysDeduction."Split in Alvys", StrSubstNo('Deduction %1 should be marked split after poll %2.', EarlierNo, DeductionNo));
+                Assert.AreEqual(2, SplitPartCount(AlvysDeduction), StrSubstNo('Deduction %1 should still have two parts after poll %2.', EarlierNo, DeductionNo));
+            end;
+
+            // [THEN] The deductions not yet split are untouched
+            for EarlierNo := DeductionNo + 1 to 3 do begin
+                AlvysDeduction.Get(EntryNos.Get(EarlierNo));
+                Assert.IsFalse(AlvysDeduction."Split in Alvys", StrSubstNo('Deduction %1 should not be marked split before it is split.', EarlierNo));
+                Assert.AreEqual(0, SplitPartCount(AlvysDeduction), StrSubstNo('Deduction %1 should have no parts before it is split.', EarlierNo));
+            end;
+        end;
+
+        // [THEN] Every part is logged exactly once, however many polls read it
+        for PartNo := 1 to PartIds.Count() do
+            Assert.AreEqual(1, DeductionRowCount(PartIds.Get(PartNo)), StrSubstNo('Part %1 should be logged once.', PartIds.Get(PartNo)));
+
+        for DeductionNo := 1 to 3 do begin
+            AlvysDeduction.Get(EntryNos.Get(DeductionNo));
+            CleanUpDeduction(AlvysDeduction.Id);
+        end;
+    end;
+
+    [Test]
     procedure FourSplitsDeepStillSettleTheDeductionOnce()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1393,14 +1670,14 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         InvoiceNo := OpenPostedInvoiceNo();
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
-        SplitId := Format(CreateGuid());
+        SplitId := AlvysStyleId();
 
         // [WHEN] It is split, and the part carrying the balance is split again three times over.
         // Each split leaves a -0.25 part behind and carries the rest into the next one.
         for Depth := 1 to 4 do begin
-            LeafId := Format(CreateGuid());
+            LeafId := AlvysStyleId();
             LeafIds.Add(LeafId);
-            SplitId := Format(CreateGuid());
+            SplitId := AlvysStyleId();
             Clear(Items);
             AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
             // What is left of the deduction after the parts split off so far, carried into the
@@ -1479,10 +1756,10 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CustomerNo := BillToCustomerNo(InvoiceNo);
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
-        PartId := Format(CreateGuid());
-        SiblingId := Format(CreateGuid());
-        FirstSubPartId := Format(CreateGuid());
-        SecondSubPartId := Format(CreateGuid());
+        PartId := AlvysStyleId();
+        SiblingId := AlvysStyleId();
+        FirstSubPartId := AlvysStyleId();
+        SecondSubPartId := AlvysStyleId();
 
         AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
         AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
@@ -1578,9 +1855,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
         for Depth := 1 to 4 do begin
-            LeafId := Format(CreateGuid());
+            LeafId := AlvysStyleId();
             LeafIds.Add(LeafId);
-            SplitId := Format(CreateGuid());
+            SplitId := AlvysStyleId();
             Clear(Items);
             AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
             AddSearchItem(Items, SplitId, AlvysDeduction."Group Id", -1.25 + (Depth * 0.25), false);
@@ -1668,10 +1945,10 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CustomerNo := BillToCustomerNo(InvoiceNo);
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
-        PartId := Format(CreateGuid());
-        SiblingId := Format(CreateGuid());
-        FirstSubPartId := Format(CreateGuid());
-        SecondSubPartId := Format(CreateGuid());
+        PartId := AlvysStyleId();
+        SiblingId := AlvysStyleId();
+        FirstSubPartId := AlvysStyleId();
+        SecondSubPartId := AlvysStyleId();
 
         AddSearchItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false);
         AddSearchItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false);
@@ -1745,9 +2022,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         RemainingBefore := InvoiceRemainingAmount(InvoiceNo);
         UnpaidDeduction(InvoiceNo, AlvysDeduction);
         for Depth := 1 to 4 do begin
-            LeafId := Format(CreateGuid());
+            LeafId := AlvysStyleId();
             LeafIds.Add(LeafId);
-            SplitId := Format(CreateGuid());
+            SplitId := AlvysStyleId();
             Clear(Items);
             AddSearchItem(Items, LeafId, AlvysDeduction."Group Id", -0.25, false);
             AddSearchItem(Items, SplitId, AlvysDeduction."Group Id", -1.25 + (Depth * 0.25), false);
@@ -2011,6 +2288,54 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// The leaves earlier splits left behind. A search returns everything Alvys still holds, so a
     /// part that was not touched by the latest split has to keep coming back with it.
     /// </summary>
+    /// <summary>
+    /// A deduction Id in the shape Alvys issues them: lower case, no braces. AL formats a GUID
+    /// upper case and braced, which no Alvys Id ever looks like, and a fixture built that way hid a
+    /// real bug -- the lookup that stops a part being logged twice upper-cases the Id it searches
+    /// for, a record filter here is case-sensitive, and an already upper-case fixture Id matched
+    /// where a real one could not.
+    /// </summary>
+    local procedure AlvysStyleId(): Text
+    begin
+        exit(LowerCase(DelChr(Format(CreateGuid()), '=', '{}')));
+    end;
+
+    /// <summary>
+    /// How many deductions are logged under one Alvys Id. Always one: a part logged a second time
+    /// is applied a second time, and the invoice is paid down twice for one settlement.
+    /// </summary>
+    local procedure DeductionRowCount(DeductionId: Text): Integer
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.SetFilter(Id, '@' + CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        exit(AlvysDeduction.Count());
+    end;
+
+    /// <summary>
+    /// Several open posted invoices, so a test can raise a deduction per invoice and check that a
+    /// split on one is kept away from the others.
+    /// </summary>
+    local procedure OpenPostedInvoiceNos(Wanted: Integer) InvoiceNos: List of [Code[20]]
+    var
+        CustLedgEntry: Record "Cust. Ledger Entry";
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Invoice);
+        CustLedgEntry.SetRange(Open, true);
+        if CustLedgEntry.FindSet() then
+            repeat
+                if SalesInvHeader.Get(CustLedgEntry."Document No.") then
+                    if PaymentDimensionsWouldPost(SalesInvHeader) then
+                        if not InvoiceNos.Contains(SalesInvHeader."No.") then begin
+                            InvoiceNos.Add(SalesInvHeader."No.");
+                            if InvoiceNos.Count() = Wanted then
+                                exit;
+                        end;
+            until CustLedgEntry.Next() = 0;
+        Assert.Fail(StrSubstNo('The company needs %1 open posted sales invoices whose dimensions satisfy both the customer and the settlement balancing account; %2 were found.', Wanted, InvoiceNos.Count()));
+    end;
+
     local procedure AddOpenLeaves(var Items: JsonArray; GroupId: Text; var LeafIds: List of [Text]; ExceptLeafId: Text)
     var
         LeafId: Text;
@@ -2342,7 +2667,7 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         // LastDeduction: Record "BAASI Alvys Deduction";
         // DeductionId: Text;
     // begin
-        // DeductionId := DelChr(Format(CreateGuid()), '=', '{}');
+        // DeductionId := DelChr(AlvysStyleId(), '=', '{}');
         // AlvysDeduction.Init();
         // if LastDeduction.FindLast() then
             // AlvysDeduction."Entry No." := LastDeduction."Entry No." + 1

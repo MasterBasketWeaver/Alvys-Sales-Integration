@@ -105,28 +105,15 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         ItemObj: JsonObject;
         ItemTkn: JsonToken;
         ItemsById: Dictionary of [Text, JsonObject];
-        GroupItems: Dictionary of [Text, List of [Text]];
-        GroupIds: List of [Text];
         EntryNos: List of [Integer];
-        ItemId, GroupId : Text;
+        ItemId: Text;
         EntryNo: Integer;
     begin
         foreach ItemTkn in Items do begin
             ItemObj := ItemTkn.AsObject();
             ItemId := SearchKey(JsonMgt.GetJsonValueAsText(ItemObj, 'Id'));
-            if ItemId <> '' then begin
+            if ItemId <> '' then
                 ItemsById.Set(ItemId, ItemObj);
-                GroupId := SearchKey(JsonMgt.GetJsonValueAsText(ItemObj, 'GroupId'));
-                if GroupId <> '' then begin
-                    if not GroupItems.ContainsKey(GroupId) then
-                        GroupItems.Add(GroupId, GroupIds);
-                    GroupItems.Get(GroupId, GroupIds);
-                    if not GroupIds.Contains(ItemId) then begin
-                        GroupIds.Add(ItemId);
-                        GroupItems.Set(GroupId, GroupIds);
-                    end;
-                end;
-            end;
         end;
 
         AlvysDeduction.SetRange("Is Paid", false);
@@ -146,7 +133,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
                     RefreshDeduction(AlvysDeduction, ItemObj)
                 else
                     if not AlvysDeduction."Split in Alvys" then
-                        LogSplitParts(AlvysDeduction, ItemsById, GroupItems);
+                        LogSplitParts(AlvysDeduction, Items);
             end;
     end;
 
@@ -166,25 +153,31 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     /// deduction may have been deleted in Alvys rather than split, and there is nothing to settle it
     /// with either way.
     /// </summary>
-    local procedure LogSplitParts(var AlvysDeduction: Record "BAASI Alvys Deduction"; var ItemsById: Dictionary of [Text, JsonObject]; var GroupItems: Dictionary of [Text, List of [Text]])
+    local procedure LogSplitParts(var AlvysDeduction: Record "BAASI Alvys Deduction"; var Items: JsonArray)
     var
         SplitPart: Record "BAASI Alvys Deduction";
         ItemObj: JsonObject;
-        GroupIds: List of [Text];
-        ItemId: Text;
+        ItemTkn: JsonToken;
+        GroupId, ItemId : Text;
         Logged: Boolean;
     begin
         if AlvysDeduction."Group Id" = '' then
             exit;
-        if not GroupItems.Get(SearchKey(AlvysDeduction."Group Id"), GroupIds) then
-            exit;
+        GroupId := SearchKey(AlvysDeduction."Group Id");
 
-        foreach ItemId in GroupIds do
-            if not DeductionExists(ItemId) then begin
-                ItemsById.Get(ItemId, ItemObj);
-                AlvysSalesMgt.InsertSplitPart(AlvysDeduction, ItemObj, SplitPart);
-                Logged := true;
+        // Read straight off the search rather than out of a lookup keyed by group: a Dictionary of
+        // [Text, List of [Text]] hands every key the same list, because an AL list is a reference,
+        // and one deduction going missing then logged the whole search as its parts.
+        foreach ItemTkn in Items do begin
+            ItemObj := ItemTkn.AsObject();
+            if SearchKey(JsonMgt.GetJsonValueAsText(ItemObj, 'GroupId')) = GroupId then begin
+                ItemId := SearchKey(JsonMgt.GetJsonValueAsText(ItemObj, 'Id'));
+                if (ItemId <> '') and not DeductionExists(ItemId) then begin
+                    AlvysSalesMgt.InsertSplitPart(AlvysDeduction, ItemObj, SplitPart);
+                    Logged := true;
+                end;
             end;
+        end;
         if not Logged then
             exit;
 
@@ -193,11 +186,19 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         AlvysSalesMgt.UpdateSplitDeduction(SplitPart."Entry No.");
     end;
 
+    /// <summary>
+    /// Whether the deduction is already logged. Matched case-insensitively with the @ filter,
+    /// because a record filter here is case-sensitive while the Id being looked up has been through
+    /// SearchKey -- which upper-cases, since an AL dictionary key is case-sensitive too. A
+    /// case-sensitive match found nothing, and every part of a split was logged again on each run.
+    /// </summary>
     local procedure DeductionExists(DeductionId: Text): Boolean
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
     begin
-        AlvysDeduction.SetRange(Id, CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
+        // Concatenated rather than passed as a placeholder: SetFilter quotes a substituted value,
+        // and the quoting defeats the @ -- the filter then matches nothing at all.
+        AlvysDeduction.SetFilter(Id, '@' + CopyStr(DeductionId, 1, MaxStrLen(AlvysDeduction.Id)));
         exit(not AlvysDeduction.IsEmpty());
     end;
 

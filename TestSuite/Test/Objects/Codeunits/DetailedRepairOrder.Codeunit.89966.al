@@ -11,6 +11,16 @@ codeunit 89966 "BAASIT Detailed Repair Order"
     /// insists on can be set before posting, and the company's own setting is put back after.
     /// </summary>
     procedure Create(TaskCount: Integer; PartsPerTask: Integer; var ROId: Text; var InvoiceNo: Code[20]; var PostedInvoiceNo: Code[20])
+    begin
+        Create(UnitNumberTok, TaskCount, PartsPerTask, ROId, InvoiceNo, PostedInvoiceNo);
+    end;
+
+    /// <summary>
+    /// The same, for a named Fleetrock unit rather than the one the chained run uses. The unit is
+    /// named by its unit number -- what the tractor code dimension and the Alvys truck carry -- and
+    /// the VIN AddRO wants is looked up from it.
+    /// </summary>
+    procedure Create(UnitNumber: Text; TaskCount: Integer; PartsPerTask: Integer; var ROId: Text; var InvoiceNo: Code[20]; var PostedInvoiceNo: Code[20])
     var
         FleetrockSetup: Record "FRI Fleetrock Setup";
         JobQueueEntry: Record "Job Queue Entry";
@@ -19,7 +29,8 @@ codeunit 89966 "BAASIT Detailed Repair Order"
         ThreeDays: Duration;
         OriginalAutoPost: Boolean;
     begin
-        ROId := ROHelper.CreateDetailedRepairOrder(UnitVinTok, TaskCount, PartsPerTask);
+        ROId := ROHelper.CreateDetailedRepairOrder(ROHelper.GetUnitVin(UnitNumber), TaskCount, PartsPerTask);
+        ROHelper.WaitForRepairOrderDetail(ROId, TaskCount, PartsPerTask);
         ROHelper.SetRepairOrderToInvoiced(ROId);
 
         FleetrockSetup.Get();
@@ -86,7 +97,7 @@ codeunit 89966 "BAASIT Detailed Repair Order"
     var
         ROHelper: Codeunit "BAASIT Fleetrock RO Helper";
 
-        UnitVinTok: Label '1234567890', Locked = true;
+        UnitNumberTok: Label '567', Locked = true;
         LocationTok: Label 'TEST', Locked = true;
         InvoicedTok: Label 'invoiced', Locked = true;
         NoInvoiceErr: Label 'No sales invoice was created for repair order %1.%2', Comment = '%1 = Repair Order Id, %2 = staging error';

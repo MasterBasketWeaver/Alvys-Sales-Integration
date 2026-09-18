@@ -22,14 +22,29 @@ page 80802 "BAASI Alvys Deductions"
                 field("Alvys Created At"; Rec."Alvys Created At") { }
                 field("Alvys Created By"; Rec."Alvys Created By") { }
                 field(Id; Rec.Id) { }
+                field("Group Id"; Rec."Group Id") { }
                 field(Type; Rec.Type) { }
                 field(Description; Rec.Description) { }
                 field(Category; Rec.Category) { }
                 field(Amount; Rec.Amount) { }
-                field("Remaining Amount"; Rec."Remaining Amount") { }
+                field("Remaining Amount"; Rec."Remaining Amount")
+                {
+                    trigger OnDrillDown()
+                    var
+                        SplitPart: Record "BAASI Alvys Deduction";
+                    begin
+                        SplitPart.SetRange("Split From Entry No.", Rec."Entry No.");
+                        SplitPart.SetRange("Is Paid", true);
+                        if SplitPart.IsEmpty() then
+                            exit;
+                        Page.Run(Page::"BAASI Alvys Deductions", SplitPart);
+                    end;
+                }
                 field("Split in Alvys"; Rec."Split in Alvys") { }
                 field("Split From Entry No."; Rec."Split From Entry No.")
                 {
+                    BlankZero = true;
+
                     trigger OnDrillDown()
                     var
                         SplitDeduction: Record "BAASI Alvys Deduction";

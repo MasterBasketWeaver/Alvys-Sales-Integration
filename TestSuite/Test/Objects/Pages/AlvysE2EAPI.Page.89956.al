@@ -115,19 +115,98 @@ page 89956 "BAASIT Alvys E2E API"
     [ServiceEnabled]
     procedure seedDetailedRepairOrder(var ActionContext: WebServiceActionContext)
     var
-        E2ERun: Record "BAASIT E2E Run";
         DetailedRepairOrder: Codeunit "BAASIT Detailed Repair Order";
         ROId: Text;
         InvoiceNo, PostedInvoiceNo : Code[20];
     begin
         DetailedRepairOrder.Create(8, 3, ROId, InvoiceNo, PostedInvoiceNo);
+        RecordDetailedRepairOrder(ROId, InvoiceNo, PostedInvoiceNo);
+        SetActionContext(ActionContext);
+    end;
 
+    /// <summary>
+    /// The same, for a named Fleetrock unit number and a chosen number of tasks and parts per task,
+    /// so a repair order can be produced for whichever truck is being looked at.
+    /// </summary>
+    [ServiceEnabled]
+    procedure seedDetailedRepairOrderForUnit(unitNumber: Text[50]; taskCount: Integer; partsPerTask: Integer; var ActionContext: WebServiceActionContext)
+    var
+        DetailedRepairOrder: Codeunit "BAASIT Detailed Repair Order";
+        ROId: Text;
+        InvoiceNo, PostedInvoiceNo : Code[20];
+    begin
+        DetailedRepairOrder.Create(unitNumber, taskCount, partsPerTask, ROId, InvoiceNo, PostedInvoiceNo);
+        RecordDetailedRepairOrder(ROId, InvoiceNo, PostedInvoiceNo);
+        SetActionContext(ActionContext);
+    end;
+
+    local procedure RecordDetailedRepairOrder(ROId: Text; InvoiceNo: Code[20]; PostedInvoiceNo: Code[20])
+    var
+        E2ERun: Record "BAASIT E2E Run";
+    begin
         E2ERun.GetSingleton();
         E2ERun."Repair Order Id" := CopyStr(ROId, 1, MaxStrLen(E2ERun."Repair Order Id"));
         E2ERun."Sales Invoice No." := InvoiceNo;
         E2ERun."Posted Invoice No." := PostedInvoiceNo;
         E2ERun."Seeded At" := CurrentDateTime();
         E2ERun.Modify();
+        Commit();
+
+        Rec.GetSingleton();
+    end;
+
+    /// <summary>
+    /// Runs the settlement poll the way the job queue runs it -- through the codeunit's OnRun, so
+    /// ScheduledRun is set and a deduction that fails is logged rather than taking the run down.
+    /// The setup page's own action calls PollSettledDeductions directly instead, which is the
+    /// by-hand path, so this is the one to use when the scheduled behaviour is what is being
+    /// checked.
+    /// </summary>
+    [ServiceEnabled]
+    procedure runSettlementPollAsJobQueue(var ActionContext: WebServiceActionContext)
+    begin
+        if not Codeunit.Run(Codeunit::"BAASI Alvys Settlement Poll") then
+            Error(PollFailedErr, GetLastErrorText());
+        Commit();
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
+    /// Unpicks split parts logged against a deduction they never belonged to. A part of a split carries the Group Id of the deduction it came from, so
+    /// a logged part whose Group Id is not the parent's was never in that group -- which is what a
+    /// poll before the grouping fix produced, attaching everything the deduction search returned to
+    /// one split deduction. Each of those rows is the only record Business Central has of a
+    /// deduction it never raised, so removing it puts the deduction back to untracked.
+    ///
+    /// The parent is then recomputed from the parts it really has. Nothing else is touched: the
+    /// journal lines and postings those rows produced stay, and so does every Alvys sales entry.
+    /// </summary>
+    [ServiceEnabled]
+    procedure undoMislinkedSplitParts(var ActionContext: WebServiceActionContext)
+    var
+        SplitDeduction, SplitPart : Record "BAASI Alvys Deduction";
+        AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
+        MislinkedPartEntryNos, SurvivingPartEntryNos : List of [Integer];
+        EntryNo: Integer;
+    begin
+        SplitPart.SetFilter("Split From Entry No.", '<>%1', 0);
+        if SplitPart.FindSet() then
+            repeat
+                if SplitDeduction.Get(SplitPart."Split From Entry No.") then
+                    if SplitDeduction."Group Id" <> SplitPart."Group Id" then
+                        MislinkedPartEntryNos.Add(SplitPart."Entry No.")
+                    else
+                        if not SurvivingPartEntryNos.Contains(SplitPart."Entry No.") then
+                            SurvivingPartEntryNos.Add(SplitPart."Entry No.");
+            until SplitPart.Next() = 0;
+
+        foreach EntryNo in MislinkedPartEntryNos do
+            if SplitPart.Get(EntryNo) then
+                SplitPart.Delete(true);
+
+        foreach EntryNo in SurvivingPartEntryNos do
+            AlvysSalesMgt.UpdateSplitDeduction(EntryNo);
         Commit();
 
         Rec.GetSingleton();
@@ -205,4 +284,7 @@ page 89956 "BAASIT Alvys E2E API"
     begin
         Rec.GetSingleton();
     end;
+
+    var
+        PollFailedErr: Label 'The settlement poll failed: %1', Comment = '%1 = the error text';
 }
