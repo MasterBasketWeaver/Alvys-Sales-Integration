@@ -1,4 +1,4 @@
-codeunit 80807 "BAASI Alvys Dimension Import"
+codeunit 80807 "BAASI Alvys Driver/Truck Imp."
 {
     // Neither an Alvys truck nor an Alvys driver names the other, so each is imported into its own
     // dimension on its own. A truck's dimension value is named after the driver Fleetrock has on

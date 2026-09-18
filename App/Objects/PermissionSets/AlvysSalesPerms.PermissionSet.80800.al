@@ -20,7 +20,7 @@ permissionset 80800 "BAASI Alvys Perms."
         codeunit "BAASI Alvys Sales Mgt." = X,
         codeunit "BAASI Alvys Settlement Poll" = X,
         codeunit "BAASI Apply Settled Deduction" = X,
-        codeunit "BAASI Alvys Dimension Import" = X,
+        codeunit "BAASI Alvys Driver/Truck Imp." = X,
         codeunit "BAASI Install" = X,
         codeunit "BAASI Subscribers" = X,
         codeunit "BAASI Upgrade" = X,

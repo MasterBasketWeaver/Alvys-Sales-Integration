@@ -117,9 +117,9 @@ page 80800 "BAASI Alvys Sales Setup"
 
                 trigger OnAction()
                 var
-                    AlvysDimensionImport: Codeunit "BAASI Alvys Dimension Import";
+                    AlvysDriverTruckImport: Codeunit "BAASI Alvys Driver/Truck Imp.";
                 begin
-                    AlvysDimensionImport.ImportTrucksAndDrivers();
+                    AlvysDriverTruckImport.ImportTrucksAndDrivers();
                     Message(ImportDoneMsg);
                 end;
             }

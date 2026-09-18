@@ -1,6 +1,6 @@
 codeunit 89967 "BAASIT Alvys Dim Import Tests"
 {
-    // [FEATURE] [Alvys Sales Integration] [Dimension Import]
+    // [FEATURE] [Alvys Sales Integration] [Driver/Truck Import]
     //
     // Imports into two dimensions created by the test rather than the setup's own, so every value
     // starts out missing and nothing a test asserts on depends on the company's data. The two
@@ -483,7 +483,7 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         end;
 
         // [WHEN] The job queue codeunit runs
-        Codeunit.Run(Codeunit::"BAASI Alvys Dimension Import");
+        Codeunit.Run(Codeunit::"BAASI Alvys Driver/Truck Imp.");
 
         // [THEN] The test truck carries its Alvys ID and is not named after its deactivated driver
         DimValue.SetRange("BAASI Alvys ID", TruckID);
@@ -867,7 +867,7 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
     var
         Assert: Codeunit "Library Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
-        DimensionImport: Codeunit "BAASI Alvys Dimension Import";
+        DimensionImport: Codeunit "BAASI Alvys Driver/Truck Imp.";
         JsonMgt: Codeunit "BAAPI Json Mgt.";
         CompanyTruckDimension, CompanyDriverDimension : Code[20];
         IsInitialized: Boolean;
