@@ -19,10 +19,7 @@ page 80800 "BAASI Alvys Sales Setup"
                     // {
                     //     ShowMandatory = true;
                     // }
-                    field("Tractor Code Dimension"; Rec."Tractor Code Dimension")
-                    {
-                        ShowMandatory = true;
-                    }
+                    field("Driver Code Dimension"; Rec."Driver Code Dimension") { }
                 }
                 group("Payment Journal")
                 {
@@ -111,6 +108,21 @@ page 80800 "BAASI Alvys Sales Setup"
                     AlvysSettlementPoll.PollSettledDeductions();
                 end;
             }
+
+            action("Import Trucks and Drivers")
+            {
+                ApplicationArea = All;
+                ToolTip = 'Creates and updates a dimension value for every truck and driver in Alvys, under the Fleetrock Setup''s Truck Dimension Code and the Driver Code Dimension. This normally runs on a schedule; use this to run it now.';
+                Image = ImportCodes;
+
+                trigger OnAction()
+                var
+                    AlvysDimensionImport: Codeunit "BAASI Alvys Dimension Import";
+                begin
+                    AlvysDimensionImport.ImportTrucksAndDrivers();
+                    Message(ImportDoneMsg);
+                end;
+            }
         }
 
         area(Promoted)
@@ -123,6 +135,9 @@ page 80800 "BAASI Alvys Sales Setup"
                 {
                 }
                 actionref("Poll Settled Deductions_Promoted"; "Poll Settled Deductions")
+                {
+                }
+                actionref("Import Trucks and Drivers_Promoted"; "Import Trucks and Drivers")
                 {
                 }
             }
@@ -145,4 +160,5 @@ page 80800 "BAASI Alvys Sales Setup"
 
     var
         AccessTokenTxt: Text;
+        ImportDoneMsg: Label 'The Alvys trucks and drivers have been imported.';
 }

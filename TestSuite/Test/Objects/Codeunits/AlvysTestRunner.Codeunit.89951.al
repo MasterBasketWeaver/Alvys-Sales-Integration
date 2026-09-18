@@ -19,6 +19,8 @@ codeunit 89951 "BAASIT Alvys Test Runner"
         Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
         Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
         Codeunit.Run(Codeunit::"BAASIT Fleetrock TZ Tests");
+        Codeunit.Run(Codeunit::"BAASIT Alvys Dim Import Tests");
+        Codeunit.Run(Codeunit::"BAASIT Fleetrock Driver Tests");
         // Codeunit "BAASIT Alvys Poll E2E Tests" is deliberately not here. Its two phases have a
         // manual settlement in the Alvys web UI between them, so it cannot run unattended as part
         // of the suite; codeunit "BAASIT E2E Test Runner" runs it a phase at a time instead.

@@ -66,7 +66,7 @@ table 80802 "BAASI Alvys Deduction"
         field(15; "Truck Number"; Text[50])
         {
             Editable = false;
-            Tooltip = 'The truck number the deduction was created for. This is the Tractor Code dimension value on the document, and is what the Alvys truck was resolved from.';
+            Tooltip = 'The truck number the deduction was created for. This is the value of the Fleetrock Setup''s Truck Dimension Code on the document, and is what the Alvys truck was resolved from.';
         }
         // Kept apart from "Is Paid" so a settlement that could not be applied stays eligible for the
         // next poll to pick up again.

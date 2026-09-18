@@ -1,7 +1,7 @@
 codeunit 80803 "BAASI Subscribers"
 {
     /// <summary>
-    /// Checks that a newly created invoice has a Tractor Code dimension value.
+    /// Checks that a newly created invoice has a truck dimension value.
     /// Done so that after the posting is complete, the invoice can be pushed to Alvys as a one-time truck deduction.
     /// </summary>
     [EventSubscriber(ObjectType::Codeunit, Codeunit::"Sales-Post", OnAfterInsertInvoiceHeader, '', false, false)]
@@ -12,9 +12,9 @@ codeunit 80803 "BAASI Subscribers"
         SingleInstance.SetSalesDocuments('', '');
         SingleInstance.ClearDeductionRecIds();
         if AlvysSetup.Get() and AlvysSetup.Enabled then begin
-            AlvysSetup.TestField("Tractor Code Dimension");
+            AlvysSalesMgt.GetTruckDimensionCode();
             if SalesHeader."Document Type" in [SalesHeader."Document Type"::Order, SalesHeader."Document Type"::Invoice] then
-                if (AlvysSalesMgt.GetTractorCodeDimensionValue(SalesHeader."Dimension Set ID") <> '') and (AlvysSalesMgt.GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID") <> '') then
+                if (AlvysSalesMgt.GetTruckDimensionValue(SalesHeader."Dimension Set ID") <> '') and (AlvysSalesMgt.GetTruckDimensionValue(SalesInvHeader."Dimension Set ID") <> '') then
                     SingleInstance.SetSalesDocuments(SalesHeader."No.", SalesInvHeader."No.");
         end
     end;
@@ -168,6 +168,15 @@ codeunit 80803 "BAASI Subscribers"
         if Balancing or (GenJournalLine."BAASI Alvys Deduction Id" = '') then
             exit;
         AlvysSalesMgt.MarkSettlementPosted(GenJournalLine."BAASI Alvys Deduction Id");
+    end;
+
+    [EventSubscriber(ObjectType::Table, Database::"FRI Fleetrock Setup", OnAfterValidateEvent, "Truck Dimension Code", false, false)]
+    local procedure FleetrockSetupOnAfterValidateTruckDimensionCode(var Rec: Record "FRI Fleetrock Setup")
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+    begin
+        if AlvysSetup.Get() then
+            AlvysSetup.CheckDimensionsDiffer(AlvysSetup."Driver Code Dimension", Rec."Truck Dimension Code");
     end;
 
     var

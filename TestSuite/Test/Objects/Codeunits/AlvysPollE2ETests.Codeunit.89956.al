@@ -315,8 +315,8 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
 
     /// <summary>
     /// Both integrations have to be configured in the company the chain runs in, rather than seeded
-    /// here: the run drives the real Fleetrock tenant and the real Alvys API, and the two have to
-    /// agree on the dimension that carries the truck or the posting will not raise a deduction.
+    /// here: the run drives the real Fleetrock tenant and the real Alvys API, and without the
+    /// Fleetrock truck dimension the posting will not raise a deduction.
     /// </summary>
     local procedure Initialize()
     begin
@@ -325,7 +325,6 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         AlvysSetup.TestField("Integration URL");
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
-        AlvysSetup.TestField("Tractor Code Dimension");
         AlvysSetup.TestField("Payment Journal Template");
         AlvysSetup.TestField("Payment Journal Batch");
         AlvysSetup.TestField("Bal. Account No.");
@@ -335,7 +334,7 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         FleetrockSetup.TestField(Username);
         FleetrockSetup.TestField("API Key");
         FleetrockSetup.TestField("Vendor Username");
-        FleetrockSetup.TestField("Asset Dimension Code", AlvysSetup."Tractor Code Dimension");
+        FleetrockSetup.TestField("Truck Dimension Code");
         FleetrockSetup.TestField("Use API Token", false);
 
         Clear(AlvysSalesMgt);

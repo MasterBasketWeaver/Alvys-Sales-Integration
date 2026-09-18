@@ -2710,7 +2710,7 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         AlvysSetup.TestField("Integration URL");
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
-        AlvysSetup.TestField("Tractor Code Dimension");
+        AlvysSalesMgt.GetTruckDimensionCode();
         AlvysSetup.SetAccessToken('');
         AlvysSetup."Access Token Expiry Date" := 0DT;
         AlvysSetup.Modify();
@@ -2767,16 +2767,15 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// </summary>
     local procedure TractorCodeDimensionSetID(TractorCode: Code[20]): Integer
     var
-        AlvysSetup: Record "BAASI Alvys Sales Setup";
         DimValue: Record "Dimension Value";
         TempDimSetEntry: Record "Dimension Set Entry" temporary;
         DimMgt: Codeunit DimensionManagement;
+        TruckDimensionCode: Code[20];
     begin
-        AlvysSetup.Get();
-        AlvysSetup.TestField("Tractor Code Dimension");
-        if not DimValue.Get(AlvysSetup."Tractor Code Dimension", TractorCode) then begin
+        TruckDimensionCode := AlvysSalesMgt.GetTruckDimensionCode();
+        if not DimValue.Get(TruckDimensionCode, TractorCode) then begin
             DimValue.Init();
-            DimValue.Validate("Dimension Code", AlvysSetup."Tractor Code Dimension");
+            DimValue.Validate("Dimension Code", TruckDimensionCode);
             DimValue.Validate(Code, TractorCode);
             DimValue.Insert(true);
         end;

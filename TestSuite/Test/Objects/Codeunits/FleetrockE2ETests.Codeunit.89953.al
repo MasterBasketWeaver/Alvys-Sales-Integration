@@ -185,7 +185,7 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
         Assert.AreEqual(GetFleetrockCustomerNo(), SalesHeader."Sell-to Customer No.", 'The invoice should be for the customer mapped to the Fleetrock customer account.');
 
         // [THEN] The invoice carries the unit number as the asset dimension
-        Assert.IsTrue(DimSetEntry.Get(SalesHeader."Dimension Set ID", FleetrockSetup."Asset Dimension Code"), 'The invoice should carry the asset dimension.');
+        Assert.IsTrue(DimSetEntry.Get(SalesHeader."Dimension Set ID", FleetrockSetup."Truck Dimension Code"), 'The invoice should carry the asset dimension.');
         Assert.AreEqual('567', Format(DimSetEntry."Dimension Value Code"), 'The asset dimension value should be the Fleetrock unit number.');
 
         // [THEN] The invoice has one labor line and one part line with the repair order's amounts
@@ -262,7 +262,7 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
 
         // [THEN] The posted invoice is for the Fleetrock customer and carries the unit as the asset dimension
         Assert.AreEqual(GetFleetrockCustomerNo(), SalesInvHeader."Sell-to Customer No.", 'The invoice should be for the customer mapped to the Fleetrock customer account.');
-        Assert.IsTrue(DimSetEntry.Get(SalesInvHeader."Dimension Set ID", FleetrockSetup."Asset Dimension Code"), 'The posted invoice should carry the asset dimension.');
+        Assert.IsTrue(DimSetEntry.Get(SalesInvHeader."Dimension Set ID", FleetrockSetup."Truck Dimension Code"), 'The posted invoice should carry the asset dimension.');
         Assert.AreEqual('567', Format(DimSetEntry."Dimension Value Code"), 'The asset dimension value should be the Fleetrock unit number.');
 
         // [THEN] The posted invoice has one labor line and one part line with the repair order's amounts
@@ -295,9 +295,9 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
 
     /// <summary>
     /// Requires both integrations to be properly configured in the company the suite runs in,
-    /// rather than seeding any setup: the Alvys integration must be enabled with its credentials
-    /// and tractor code dimension, and the Fleetrock integration must carry its credentials and
-    /// use that same dimension as its asset dimension so posting hands the truck to Alvys.
+    /// rather than seeding any setup: the Alvys integration must be enabled with its credentials,
+    /// and the Fleetrock integration must carry its credentials and the truck dimension, which is
+    /// what posting hands to Alvys as the truck.
     /// Auto-posting of repair orders is set by each scenario rather than required, and the Fleetrock
     /// test tenant only accepts the raw API key, not a generated token.
     /// </summary>
@@ -308,7 +308,6 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
         AlvysSetup.TestField("Integration URL");
         AlvysSetup.TestField("Client ID");
         AlvysSetup.TestField("Client Secret");
-        AlvysSetup.TestField("Tractor Code Dimension");
         // The run settles the deduction the posting creates, so the company needs the journal that
         // settlement is written to as well.
         AlvysSetup.TestField("Payment Journal Template");
@@ -320,7 +319,7 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
         FleetrockSetup.TestField(Username);
         FleetrockSetup.TestField("API Key");
         FleetrockSetup.TestField("Vendor Username");
-        FleetrockSetup.TestField("Asset Dimension Code", AlvysSetup."Tractor Code Dimension");
+        FleetrockSetup.TestField("Truck Dimension Code");
         FleetrockSetup.TestField("Use API Token", false);
 
         Clear(AlvysSalesMgt);

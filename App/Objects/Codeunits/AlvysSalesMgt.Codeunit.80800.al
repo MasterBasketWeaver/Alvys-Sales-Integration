@@ -4,6 +4,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         tabledata "BAASI Alvys Sales Entry" = RIMD,
         tabledata "BAASI Alvys Deduction" = RIMD,
         tabledata "Dimension Set Entry" = R,
+        tabledata "FRI Fleetrock Setup" = R,
         tabledata "Sales Invoice Header" = R,
         tabledata "Gen. Journal Template" = R,
         tabledata "Gen. Journal Batch" = R,
@@ -127,6 +128,39 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
 
 
 
+    procedure GetTrucks(var TrucksArray: JsonArray; var ErrorText: Text): Boolean
+    begin
+        exit(GetList(TrucksPathTok, TrucksArray, ErrorText));
+    end;
+
+    procedure GetDrivers(var DriversArray: JsonArray; var ErrorText: Text): Boolean
+    begin
+        exit(GetList(DriversPathTok, DriversArray, ErrorText));
+    end;
+
+    /// <summary>
+    /// GET trucks and GET drivers return every record, active or not, as one bare array: they take
+    /// no paging, and the IsActive filter on trucks/search is ignored. The import asks on every run,
+    /// so only a failed call is logged, leaving the caller to commit the entry before raising.
+    /// </summary>
+    local procedure GetList(Path: Text; var ResponseArray: JsonArray; var ErrorText: Text): Boolean
+    var
+        RequestHeaderValues: Dictionary of [Text, Text];
+        URL, ResponseText : Text;
+    begin
+        GetAndCheckSetup();
+        Clear(ResponseArray);
+        URL := AlvysSetup."Integration URL" + Path;
+        PrepareHeaderValues(CheckToGetAccessToken(), RequestHeaderValues);
+        if RESTAPIMgt.TrySendRequest('GET', URL, '', '', RequestHeaderValues, ResponseText, ErrorText) then begin
+            if ResponseArray.ReadFrom(ResponseText) then
+                exit(true);
+            ErrorText := StrSubstNo(UnexpectedListResponseErr, Path, ResponseText);
+        end;
+        InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, 'GET', '', ResponseText, ErrorText, false, true);
+        exit(false);
+    end;
+
     /// <summary>
     /// Creates a deduction for the truck on a posted sales document. Both headers are needed: the
     /// truck and the dimension come off the posted invoice, while the sales header is what says
@@ -138,7 +172,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         TruckNumber: Text[50];
         TruckID: Text;
     begin
-        TruckNumber := CopyStr(GetTractorCodeDimensionValue(SalesInvHeader."Dimension Set ID"), 1, MaxStrLen(AlvysDeduction."Truck Number"));
+        TruckNumber := CopyStr(GetTruckDimensionValue(SalesInvHeader."Dimension Set ID"), 1, MaxStrLen(AlvysDeduction."Truck Number"));
         TruckID := GetTruckID(TruckNumber, SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No.");
         exit(CreateDeductionForTruck(TruckID, TruckNumber, Date, Amount, Category, Description, SalesHeader."Document Type", SalesHeader."No.", SalesInvHeader."No.", PreviewMode));
     end;
@@ -421,17 +455,27 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
 
-    procedure GetTractorCodeDimensionValue(DimSetID: Integer): Text
+    procedure GetTruckDimensionValue(DimSetID: Integer): Text
     var
         DimSetEntry: Record "Dimension Set Entry";
+        TruckDimensionCode: Code[20];
     begin
         if DimSetID = 0 then
             exit('');
         GetAndCheckSetup();
-        AlvysSetup.TestField("Tractor Code Dimension");
-        if not DimSetEntry.Get(DimSetID, AlvysSetup."Tractor Code Dimension") then
-            Error(MissingTractorCodeErr, AlvysSetup."Tractor Code Dimension");
+        TruckDimensionCode := GetTruckDimensionCode();
+        if not DimSetEntry.Get(DimSetID, TruckDimensionCode) then
+            Error(MissingTruckDimensionErr, TruckDimensionCode);
         exit(DimSetEntry."Dimension Value Code");
+    end;
+
+    procedure GetTruckDimensionCode(): Code[20]
+    var
+        FleetrockSetup: Record "FRI Fleetrock Setup";
+    begin
+        FleetrockSetup.Get();
+        FleetrockSetup.TestField("Truck Dimension Code");
+        exit(FleetrockSetup."Truck Dimension Code");
     end;
 
 
@@ -1058,6 +1102,9 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         TruckIdTok: Label 'TruckId', Locked = true;
         DeductionsPathTok: Label 'deductions/', Locked = true;
         DriverIdTok: Label 'DriverId', Locked = true;
+        TrucksPathTok: Label 'trucks', Locked = true;
+        DriversPathTok: Label 'drivers', Locked = true;
+        UnexpectedListResponseErr: Label 'Alvys did not return a list of %1:\%2', Comment = '%1 = trucks or drivers, %2 = Response Text';
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';
         MissingSearchDateErr: Label 'A deduction search needs a date to start from.';
@@ -1071,7 +1118,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         ApplySetupFieldBlankErr: Label 'The Alvys Sales Setup has no %1, so the settlement has no journal to be written to.', Comment = '%1 = the blank setup field''s caption';
         ApplyPostingFailedErr: Label 'The settlement was written to journal batch %1 %2, but the batch could not be posted: %3', Comment = '%1 = Payment Journal Template, %2 = Payment Journal Batch, %3 = the posting error';
         NoDeductionFoundErr: Label 'No Alvys deduction was found with Id %1.', Comment = '%1 = Deduction Id';
-        MissingTractorCodeErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Tractor Code Dimension';
+        MissingTruckDimensionErr: Label 'The document does not have a value for the %1 dimension.', Comment = '%1 = Truck Dimension Code';
         UnsupportedDocTypeErr: Label 'Sales documents of type %1 are not supported. Only orders and invoices can be sent to Alvys.', Comment = '%1 = Sales Document Type';
         NoSalesInvoiceFoundErr: Label 'Posted sales invoice %1, recorded on deduction %2, no longer exists.', Comment = '%1 = Posted Sales Invoice No., %2 = Deduction Id';
         MissingPostedDocumentNoErr: Label 'Deduction %1 must have a Posted Document No. specified before it can be applied.', Comment = '%1 = Deduction Entry No.';
