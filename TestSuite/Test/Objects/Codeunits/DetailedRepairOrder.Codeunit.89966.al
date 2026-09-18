@@ -63,6 +63,50 @@ codeunit 89966 "BAASIT Detailed Repair Order"
     end;
 
     /// <summary>
+    /// Imports and posts a repair order that already exists in Fleetrock, for one this app did not
+    /// create -- a repair order carrying tax has to be entered in the Fleetrock UI, because AddRO
+    /// and UpdateRO both accept a tax rate, report success and leave it at zero.
+    /// </summary>
+    procedure ImportAndPost(ROId: Text; var InvoiceNo: Code[20]; var PostedInvoiceNo: Code[20])
+    var
+        FleetrockSetup: Record "FRI Fleetrock Setup";
+        JobQueueEntry: Record "Job Queue Entry";
+        SalesInvHeader: Record "Sales Invoice Header";
+        GetRepairOrders: Codeunit "FRI Get Repair Orders";
+        ThreeDays: Duration;
+        OriginalAutoPost: Boolean;
+    begin
+        ROHelper.WaitForInvoicedDate(ROId);
+
+        FleetrockSetup.Get();
+        OriginalAutoPost := FleetrockSetup."Auto-post Repair Orders";
+        if OriginalAutoPost then begin
+            FleetrockSetup."Auto-post Repair Orders" := false;
+            FleetrockSetup.Modify();
+        end;
+
+        JobQueueEntry.Init();
+        JobQueueEntry."Parameter String" := InvoicedTok;
+        ThreeDays := 3 * 24 * 60 * 60 * 1000;
+        GetRepairOrders.SetStartDateTime(CurrentDateTime() - ThreeDays);
+        GetRepairOrders.Run(JobQueueEntry);
+
+        if OriginalAutoPost then begin
+            FleetrockSetup.Get();
+            FleetrockSetup."Auto-post Repair Orders" := OriginalAutoPost;
+            FleetrockSetup.Modify();
+        end;
+        Commit();
+
+        InvoiceNo := PostImportedInvoice(ROId);
+
+        SalesInvHeader.SetRange("FRI Fleetrock Repair Order No.", ROId);
+        if not SalesInvHeader.FindFirst() then
+            Error(NoPostedInvoiceErr, ROId, ROHelper.GetStagingError(ROId));
+        PostedInvoiceNo := SalesInvHeader."No.";
+    end;
+
+    /// <summary>
     /// Posts the imported invoice the way codeunit "BAASIT Alvys Poll E2E Tests" does, including the
     /// TEST location another app in the sandbox insists on, set without validation so the asset
     /// dimension the import placed on the document survives.

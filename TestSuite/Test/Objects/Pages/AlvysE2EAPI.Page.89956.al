@@ -140,6 +140,21 @@ page 89956 "BAASIT Alvys E2E API"
         SetActionContext(ActionContext);
     end;
 
+    /// <summary>
+    /// Imports and posts a repair order that already exists in Fleetrock, named by its Fleetrock
+    /// Id, for one entered in the Fleetrock UI rather than created here.
+    /// </summary>
+    [ServiceEnabled]
+    procedure importAndPostRepairOrder(repairOrderId: Text[50]; var ActionContext: WebServiceActionContext)
+    var
+        DetailedRepairOrder: Codeunit "BAASIT Detailed Repair Order";
+        InvoiceNo, PostedInvoiceNo : Code[20];
+    begin
+        DetailedRepairOrder.ImportAndPost(repairOrderId, InvoiceNo, PostedInvoiceNo);
+        RecordDetailedRepairOrder(repairOrderId, InvoiceNo, PostedInvoiceNo);
+        SetActionContext(ActionContext);
+    end;
+
     local procedure RecordDetailedRepairOrder(ROId: Text; InvoiceNo: Code[20]; PostedInvoiceNo: Code[20])
     var
         E2ERun: Record "BAASIT E2E Run";
