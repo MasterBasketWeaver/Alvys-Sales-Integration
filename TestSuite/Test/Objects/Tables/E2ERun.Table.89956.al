@@ -27,6 +27,7 @@ table 89956 "BAASIT E2E Run"
         field(14; "Invoice Remaining Amount"; Decimal) { DataClassification = SystemMetadata; }
         field(15; "Invoice Closed"; Boolean) { DataClassification = SystemMetadata; }
         field(16; "Auto-Post Repair Orders"; Boolean) { DataClassification = SystemMetadata; }
+        field(17; "Statement Unit No."; Text[50]) { DataClassification = SystemMetadata; }
     }
 
     keys

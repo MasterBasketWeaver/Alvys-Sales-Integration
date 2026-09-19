@@ -76,7 +76,7 @@ codeunit 89952 "BAASIT Test Run Mgt."
 
         Codeunit.Run(Codeunit::"BAASIT E2E Test Runner");
         E2EContext.SetPhase(Enum::"BAASIT E2E Phase"::None);
-        if Phase = Phase::Poll then
+        if Phase in [Phase::Poll, Phase::"Statement Poll"] then
             JobQueueHold.ResumeJobQueues();
 
         TestRun."Started At" := StartedAt;

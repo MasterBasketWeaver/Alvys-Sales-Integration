@@ -10,6 +10,7 @@ codeunit 89958 "BAASIT E2E Test Runner"
     trigger OnRun()
     begin
         Codeunit.Run(Codeunit::"BAASIT Alvys Poll E2E Tests");
+        Codeunit.Run(Codeunit::"BAASIT Alvys Stmt E2E Tests");
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean

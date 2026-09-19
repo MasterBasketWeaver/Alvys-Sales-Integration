@@ -108,6 +108,39 @@ page 89956 "BAASIT Alvys E2E API"
     end;
 
     /// <summary>
+    /// Phase one of the statement-date chain: a repair order per case on the named Fleetrock unit,
+    /// posted, with its deduction left unpaid in Alvys. The cases are read back from
+    /// alvysE2eStmtCases. Tools/alvys-e2e-statements.py drives it.
+    /// </summary>
+    [ServiceEnabled]
+    procedure seedStatementCases(unitNumber: Text[50]; var ActionContext: WebServiceActionContext)
+    var
+        E2ERun: Record "BAASIT E2E Run";
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+    begin
+        E2ERun.GetSingleton();
+        E2ERun."Statement Unit No." := unitNumber;
+        E2ERun.Modify();
+        TestRunMgt.RunE2EPhase(Enum::"BAASIT E2E Phase"::"Statement Seed");
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
+    /// Phase two of the statement-date chain, once every part has been paid in Alvys and recorded
+    /// in alvysE2eStmtLeaves.
+    /// </summary>
+    [ServiceEnabled]
+    procedure pollStatementCases(var ActionContext: WebServiceActionContext)
+    var
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+    begin
+        TestRunMgt.RunE2EPhase(Enum::"BAASIT E2E Phase"::"Statement Poll");
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
     /// Creates one busy repair order in Fleetrock -- eight tasks of three parts each -- imports it
     /// and posts it, for looking at in Business Central rather than for a test. What it produced is
     /// read back off the entity, so it lands in the same fields a seeded chain uses.

@@ -13,8 +13,9 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | `bc_auth.py` | OAuth device-code flow with a persistent token cache. `get_access_token()` is imported by the two scripts above. |
 | `project_paths.py` | Resolves `TOOLS`, `REPO` and `PROJECT_ROOT`. Use it for anything kept out of git. |
 | `alvys-e2e.py [manual\|jobqueue\|both\|resume\|reset] [--auto-post off\|on\|both]` | Drives the chained Fleetrock -> BC -> Alvys -> poll test, settling the deduction in the Alvys UI between phases. With no arguments it runs two chains: Manual poll with Fleetrock auto-post off, and Job Queue poll with it on. |
+| `alvys-e2e-statements.py [7777\|TEST420]` | Statement-date chain: three repair orders on the truck, paid in the Alvys UI whole, split once and split twice over three pay periods, then checks each part's payment date in BC and the invoice/Fleetrock paid dates. Uses up three pay periods on the truck per run. |
 | `alvys_api.py` | Alvys public API client (token, deduction reads, `wait_until_paid`). |
-| `alvys_ui.py` | Playwright helpers for the Alvys web UI, including `settle_truck_deductions`. |
+| `alvys_ui.py` | Playwright helpers for the Alvys web UI: `settle_truck_deductions` settles a truck's whole Open tab, `settle_rows` only the rows named, and `split_deduction` splits a row in two. |
 | `bc_session.py` | Shared Playwright helpers for the BC web client; re-authenticates automatically when the saved session expires. |
 | `bc_browser.py`, `bc_click.py`, `bc_probe.py`, `bc_action_msg.py`, `bc_action_details.py`, `bc_err_probe.py`, `bc_err_copy.py` | Ad-hoc helpers for driving and inspecting BC pages while debugging. |
 | `.upload_server.py` | Small HTTP upload server, writing into the project root. |

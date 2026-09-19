@@ -29,6 +29,10 @@ codeunit 89957 "BAASIT E2E Context"
                 exit(FunctionName = 'RepairOrderReachesAlvysAsADeduction');
             Phase::Poll:
                 exit(FunctionName = 'SettledDeductionIsPolledBackAndPaysTheInvoice');
+            Phase::"Statement Seed":
+                exit(FunctionName = 'RepairOrdersReachAlvysForEachStatementCase');
+            Phase::"Statement Poll":
+                exit(FunctionName = 'EachPartPostsOnItsStatementDateInBCAndFleetrock');
         end;
         exit(false);
     end;

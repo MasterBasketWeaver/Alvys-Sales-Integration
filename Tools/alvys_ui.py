@@ -10,6 +10,7 @@ The session lives in the .alvysprofile persistent Chromium profile in the projec
 once with "Remember this device for 30 days"; see alvys-login.py when that lapses.
 """
 import os
+import re
 
 from playwright.sync_api import sync_playwright
 
@@ -208,6 +209,157 @@ def generate_statement(page):
         return False
     page.wait_for_timeout(20000)
     return True
+
+
+def row_element(page, description, selector):
+    """Click `selector` in the Open-tab row whose description cell reads `description`.
+
+    The tab is an AG Grid whose pinned columns sit in separate containers, so one visible row is
+    several [role=row] elements sharing a row-index, found here within the description cell's own
+    grid. The click is dispatched from the page because the grid's invisible horizontal-scroll
+    spacer sits over the pinned column and swallows a real mouse click.
+    """
+    return page.evaluate(
+        """([desc, sel]) => {
+            // Alvys keeps the double space before a split part's "(part n)"; the page collapses it.
+            const norm = t => t.replace(/\\s+/g, ' ').trim();
+            for (const cell of document.querySelectorAll('[role=dialog] [role=gridcell]')) {
+                if (norm(cell.innerText) !== norm(desc)) continue;
+                const row = cell.closest('[role=row][row-index]');
+                const grid = cell.closest('.ag-root');
+                if (!row || !grid) continue;
+                const idx = row.getAttribute('row-index');
+                for (const r of grid.querySelectorAll(`[role=row][row-index="${idx}"]`)) {
+                    const el = r.querySelector(sel);
+                    if (el) { el.click(); return true; }
+                }
+            }
+            return false;
+        }""",
+        [description, selector],
+    )
+
+
+def click_in_row(page, description, selector, attempts=5):
+    """The grid fills in a few seconds after the tab opens, so a row not there yet is retried."""
+    for _ in range(attempts):
+        if row_element(page, description, selector):
+            return True
+        page.wait_for_timeout(3000)
+    return False
+
+
+def open_row_menu(page, description):
+    if not click_in_row(page, description, 'button[aria-label="Open context menu"]'):
+        return False
+    page.wait_for_timeout(1500)
+    return True
+
+
+def split_row(page, description, first_amount, second_amount):
+    """Split an open deduction in two. Alvys takes the parts as positive amounts even for a
+    deduction, and names them "<description> (part 1)" and "(part 2)"."""
+    if not open_row_menu(page, description):
+        raise RuntimeError(f"no open row described {description!r}")
+    page.get_by_role("menuitem", name="Split").click(timeout=15000)
+    page.wait_for_timeout(2500)
+    for name, amount in (("split1Amount", first_amount), ("split2Amount", second_amount)):
+        box = page.locator(f'input[name="{name}"]')
+        box.click(timeout=15000)
+        box.fill(f"{abs(amount):.2f}")
+    page.get_by_role("button", name="Save", exact=True).click(timeout=15000)
+    page.wait_for_timeout(10000)
+
+
+def select_rows(page, descriptions):
+    for description in descriptions:
+        if not click_in_row(page, description, 'input[type=checkbox]'):
+            raise RuntimeError(f"no open row described {description!r}")
+        page.wait_for_timeout(800)
+
+
+def open_truck(page, driver_name, truck_number):
+    goto_settlements(page)
+    if not show_all_drivers(page):
+        raise RuntimeError("could not turn on Show all drivers")
+    if not set_entity(page):
+        raise RuntimeError("could not switch the grid to Owner Op.")
+    if not search(page, driver_name):
+        raise RuntimeError("could not find the settlements search box")
+    open_row(page, driver_name)
+    if not select_truck(page, truck_number):
+        raise RuntimeError(f"no Truck #{truck_number} tab for {driver_name}")
+    if not modal_tab(page, "Open"):
+        raise RuntimeError("could not open the Open tab")
+
+
+def pay_period_picker(page):
+    """The Open tab's pay-period dropdown, a combobox whose label is the selected period."""
+    return page.locator('[role=dialog] button[role=combobox]').filter(has_text=re.compile(r"\d{4}")).last
+
+
+def pay_periods(page):
+    """The pay periods the truck can still be settled into, oldest first. Alvys closes a period for
+    a truck once a statement has been generated in it, and offers only a week or two ahead."""
+    picker = pay_period_picker(page)
+    picker.click(timeout=15000)
+    page.wait_for_timeout(2500)
+    options = page.evaluate("() => Array.from(document.querySelectorAll('[role=option]')).map(e => e.innerText.trim())")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(1000)
+    return options
+
+
+def select_pay_period(page, label):
+    picker = pay_period_picker(page)
+    if picker.inner_text().strip() == label:
+        return
+    picker.click(timeout=15000)
+    page.wait_for_timeout(2500)
+    page.get_by_role("option", name=label, exact=True).click(timeout=15000)
+    page.wait_for_timeout(8000)
+    if picker.inner_text().strip() != label:
+        raise RuntimeError(f"could not select pay period {label!r}")
+
+
+def list_pay_periods(driver_name, truck_number, headless=True):
+    with sync_playwright() as p:
+        ctx, page = open_context(p, headless)
+        try:
+            open_truck(page, driver_name, truck_number)
+            return pay_periods(page)
+        finally:
+            ctx.close()
+
+
+def split_deduction(driver_name, truck_number, description, first_amount, second_amount, headless=True):
+    with sync_playwright() as p:
+        ctx, page = open_context(p, headless)
+        try:
+            open_truck(page, driver_name, truck_number)
+            split_row(page, description, first_amount, second_amount)
+        finally:
+            ctx.close()
+
+
+def settle_rows(driver_name, truck_number, descriptions, pay_period=None, headless=True):
+    """Settle only the named open deductions, leaving the rest of the truck's Open tab alone, on a
+    statement for the pay period given, or the one the tab offers first."""
+    with sync_playwright() as p:
+        ctx, page = open_context(p, headless)
+        try:
+            open_truck(page, driver_name, truck_number)
+            if pay_period:
+                select_pay_period(page, pay_period)
+            select_rows(page, descriptions)
+            if not approve(page):
+                raise RuntimeError("could not approve the selected items")
+            modal_tab(page, "Draft")
+            # One click only: a statement can sit queued for half an hour with its rows still
+            # showing in the draft, and clicking again then would risk generating it twice.
+            return generate_statement(page)
+        finally:
+            ctx.close()
 
 
 def settle_truck_deductions(driver_name, truck_number, headless=True):
