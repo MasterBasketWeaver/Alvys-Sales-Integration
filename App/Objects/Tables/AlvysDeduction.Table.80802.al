@@ -132,6 +132,22 @@ table 80802 "BAASI Alvys Deduction"
             TableRelation = "BAASI Alvys Deduction"."Entry No.";
             Tooltip = 'The deduction this one was split from in Alvys. Blank for a deduction Business Central raised itself.';
         }
+        field(36; "Owner Operator Id"; Text[50])
+        {
+            Editable = false;
+            Tooltip = 'The Alvys owner operator the deduction is taken from. Their settlement statements are searched for the statement that paid it.';
+        }
+        field(37; "Statement No."; Integer)
+        {
+            Editable = false;
+            BlankZero = true;
+            Tooltip = 'The Alvys driver settlement statement that paid the deduction. Blank when no statement lists it, for instance when it was marked paid in Alvys without one.';
+        }
+        field(38; "Statement Date"; Date)
+        {
+            Editable = false;
+            Tooltip = 'The date of the Alvys statement that paid the deduction. The settlement payment is posted on this date; without a statement it is posted on the work date of the poll that applied it.';
+        }
     }
 
     keys

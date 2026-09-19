@@ -57,8 +57,11 @@ page 80802 "BAASI Alvys Deductions"
                 field("Truck Id"; Rec."Truck Id") { }
                 field("Truck Number"; Rec."Truck Number") { }
                 field("Driver Id"; Rec."Driver Id") { }
+                field("Owner Operator Id"; Rec."Owner Operator Id") { }
                 field(Date; Rec.Date) { }
                 field("Is Paid"; Rec."Is Paid") { }
+                field("Statement No."; Rec."Statement No.") { }
+                field("Statement Date"; Rec."Statement Date") { }
                 field("Settlement Applied"; Rec."Settlement Applied") { }
                 field("Settlement Applied At"; Rec."Settlement Applied At") { }
                 field("Settlement Posted"; Rec."Settlement Posted") { }
@@ -106,13 +109,14 @@ page 80802 "BAASI Alvys Deductions"
             action("Apply Settled Deduction")
             {
                 Caption = 'Apply Settled Deduction';
-                Tooltip = 'Checks if the Deduction has been paid in Alvys, and if so creates a journal line to apply the deduction payment to related Posted Sales Invoice. IF auto-post has been configured in the Alvys Sales Setup table then it will also post the newly created journal line.';
+                Tooltip = 'Creates a journal line applying a deduction Alvys has paid to its posted sales invoice, dated on the Alvys statement that paid it, or on the work date if no statement lists it. If auto-post has been configured in the Alvys Sales Setup table then it will also post the newly created journal line.';
                 Image = Payment;
                 ApplicationArea = All;
 
                 trigger OnAction()
                 var
                     AlvysSalesSetup: Record "BAASI Alvys Sales Setup";
+                    AlvysDeduction: Record "BAASI Alvys Deduction";
                     GenJnlLine: Record "Gen. Journal Line";
                     AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
                     ErrorText, LineAction : Text;
@@ -127,6 +131,11 @@ page 80802 "BAASI Alvys Deductions"
                     GenJnlLine.SetRange("BAASI Alvys Deduction Id", Rec."Id");
                     NewLine := GenJnlLine.IsEmpty();
 
+                    if Rec."Statement No." = 0 then begin
+                        AlvysDeduction.SetRange("Entry No.", Rec."Entry No.");
+                        AlvysSettlementPoll.LinkStatements(AlvysDeduction);
+                        Rec.Get(Rec."Entry No.");
+                    end;
                     ErrorText := AlvysSettlementPoll.ApplySettledDeduction(Rec);
                     if ErrorText <> '' then
                         Error(ErrorText);

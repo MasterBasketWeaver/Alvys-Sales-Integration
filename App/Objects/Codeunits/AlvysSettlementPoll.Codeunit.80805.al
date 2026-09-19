@@ -1,11 +1,13 @@
 codeunit 80805 "BAASI Alvys Settlement Poll"
 {
-    // Alvys has no driver pay webhook event and no settlement resource in the public API, so a
-    // settlement can only be found by looking: the IsPaid flag on the deduction, or on the parts it
-    // was split into, turning over is the whole signal.
+    // Alvys sends no webhook when a deduction is paid, so a settlement can only be found by
+    // looking: the IsPaid flag on the deduction, or on the parts it was split into, turning over is
+    // what says it was paid. The deduction itself carries no paid date and no link to what paid it,
+    // so the statement is found separately, to post the payment on the statement's date.
 
     Permissions = tabledata "BAASI Alvys Deduction" = RIMD,
-        tabledata "BAASI Alvys Sales Entry" = RIMD;
+        tabledata "BAASI Alvys Sales Entry" = RIMD,
+        tabledata "Sales Invoice Header" = R;
 
     trigger OnRun()
     begin
@@ -20,6 +22,7 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     procedure PollSettledDeductions()
     begin
         RefreshPaidDeductions();
+        LinkPaidDeductionsToStatements();
         ApplySettledDeductions();
     end;
 
@@ -138,12 +141,20 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     end;
 
     local procedure RefreshDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; var ItemObj: JsonObject)
+    var
+        IsPaid: Boolean;
     begin
-        if not JsonMgt.GetJsonValueAsBoolean(ItemObj, 'IsPaid') then
-            exit;
-        AlvysDeduction."Is Paid" := true;
-        AlvysDeduction.Modify(true);
-        AlvysSalesMgt.UpdateSplitDeduction(AlvysDeduction."Entry No.");
+        IsPaid := JsonMgt.GetJsonValueAsBoolean(ItemObj, 'IsPaid');
+        // Deductions logged before the owner operator was kept get it here, while still unpaid, so
+        // their statement can be searched for once they are paid.
+        if (AlvysDeduction."Owner Operator Id" = '') or IsPaid then begin
+            if AlvysDeduction."Owner Operator Id" = '' then
+                AlvysDeduction."Owner Operator Id" := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'OwnerOperatorId'), 1, MaxStrLen(AlvysDeduction."Owner Operator Id"));
+            AlvysDeduction."Is Paid" := IsPaid;
+            AlvysDeduction.Modify(true);
+        end;
+        if IsPaid then
+            AlvysSalesMgt.UpdateSplitDeduction(AlvysDeduction."Entry No.");
     end;
 
     /// <summary>
@@ -202,6 +213,158 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         exit(not AlvysDeduction.IsEmpty());
     end;
 
+    local procedure LinkPaidDeductionsToStatements()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.SetRange("Is Paid", true);
+        AlvysDeduction.SetRange("Settlement Applied", false);
+        AlvysDeduction.SetRange("Split in Alvys", false);
+        AlvysDeduction.SetFilter("Posted Document No.", '<>%1', '');
+        LinkStatements(AlvysDeduction);
+    end;
+
+    /// <summary>
+    /// Finds the settlement statement that paid each deduction in the set not yet linked to one,
+    /// searching the statements of each owner operator involved. A deduction no statement lists --
+    /// one marked paid in Alvys without a statement -- is left unlinked and posts on the work date.
+    /// </summary>
+    internal procedure LinkStatements(var AlvysDeduction: Record "BAASI Alvys Deduction")
+    var
+        Unlinked: Record "BAASI Alvys Deduction";
+        Statements: JsonArray;
+        EarliestDates: Dictionary of [Text, Date];
+        OwnerOperatorId: Text;
+        EarliestDate, DeductionDate : Date;
+    begin
+        Unlinked.CopyFilters(AlvysDeduction);
+        Unlinked.SetRange("Statement No.", 0);
+        Unlinked.SetFilter("Owner Operator Id", '<>%1', '');
+        if not Unlinked.FindSet() then
+            exit;
+        repeat
+            DeductionDate := Unlinked.Date;
+            if DeductionDate = 0D then
+                DeductionDate := WorkDate();
+            if not EarliestDates.Get(Unlinked."Owner Operator Id", EarliestDate) or (DeductionDate < EarliestDate) then
+                EarliestDates.Set(Unlinked."Owner Operator Id", DeductionDate);
+        until Unlinked.Next() = 0;
+
+        foreach OwnerOperatorId in EarliestDates.Keys() do
+            CollectStatements(OwnerOperatorId, EarliestDates.Get(OwnerOperatorId), Statements);
+        MatchStatements(Unlinked, Statements);
+    end;
+
+    /// <summary>
+    /// A statement's date is the end of the pay period it was generated for, which is chosen when it
+    /// is generated and bears no fixed relation to the deduction's date: a statement dated nine
+    /// months before the deduction it paid has been seen, and one dated weeks ahead of the day it
+    /// was generated. So the range is wide on both sides, and kept affordable by asking for one
+    /// owner operator's statements at a time.
+    /// </summary>
+    local procedure CollectStatements(OwnerOperatorId: Text; EarliestDeductionDate: Date; var Statements: JsonArray)
+    var
+        ResponseObj: JsonObject;
+        ItemsArray: JsonArray;
+        JsonTkn: JsonToken;
+        ErrorText: Text;
+        PageNo, Read, Total : Integer;
+    begin
+        repeat
+            if not AlvysSalesMgt.SearchDriverStatements(OwnerOperatorId, CalcDate('<-1Y>', EarliestDeductionDate), CalcDate('<+1Y>', Today()), PageNo, SearchPageSize(), ResponseObj, ErrorText) then begin
+                if ScheduledRun then
+                    Commit();
+                Error(ErrorText);
+            end;
+            if not ResponseObj.Get('Items', JsonTkn) then
+                exit;
+            ItemsArray := JsonTkn.AsArray();
+            if ItemsArray.Count() = 0 then
+                exit;
+            Total := JsonMgt.GetJsonValueAsInteger(ResponseObj, 'Total');
+            foreach JsonTkn in ItemsArray do begin
+                Statements.Add(JsonTkn);
+                Read += 1;
+            end;
+            PageNo += 1;
+        until Read >= Total;
+    end;
+
+    /// <summary>
+    /// A statement line does not carry the Id of the deduction it paid, only its description and
+    /// amount, so that is what a deduction is matched on, within its own owner operator's
+    /// statements. The description names the posted invoice, and a part of a split adds its
+    /// "(part n)" to it, so it tells deductions apart; the amount guards against a description
+    /// edited to match another. A line is used for one deduction only.
+    /// </summary>
+    internal procedure MatchStatements(var AlvysDeduction: Record "BAASI Alvys Deduction"; var Statements: JsonArray)
+    var
+        Unlinked: Record "BAASI Alvys Deduction";
+        StatementObj, DriverObj, LineObj, SubLineObj, AmountObj : JsonObject;
+        StatementTkn, LineTkn, SubLineTkn, JsonTkn : JsonToken;
+        LineKeys: List of [Text];
+        StatementNos: List of [Integer];
+        StatementDates: List of [Date];
+        Used: List of [Boolean];
+        EntryNos: List of [Integer];
+        DriverId: Text;
+        StatementNo, EntryNo, i : Integer;
+        StatementDate: Date;
+    begin
+        foreach StatementTkn in Statements do begin
+            StatementObj := StatementTkn.AsObject();
+            StatementNo := JsonMgt.GetJsonValueAsInteger(StatementObj, 'Number');
+            DriverId := '';
+            if StatementObj.Get('Driver', JsonTkn) then begin
+                DriverObj := JsonTkn.AsObject();
+                DriverId := JsonMgt.GetJsonValueAsText(DriverObj, 'Id');
+            end;
+            if (StatementNo <> 0) and Evaluate(StatementDate, JsonMgt.GetJsonValueAsText(StatementObj, 'StatementDate'), 9) then
+                if StatementObj.Get('LineItems', JsonTkn) then
+                    foreach LineTkn in JsonTkn.AsArray() do begin
+                        LineObj := LineTkn.AsObject();
+                        if LineObj.Get('SubLines', JsonTkn) then
+                            foreach SubLineTkn in JsonTkn.AsArray() do begin
+                                SubLineObj := SubLineTkn.AsObject();
+                                if SubLineObj.Get('Amount', JsonTkn) then begin
+                                    AmountObj := JsonTkn.AsObject();
+                                    LineKeys.Add(StatementLineKey(DriverId, JsonMgt.GetJsonValueAsText(SubLineObj, 'Description'), JsonMgt.GetJsonValueAsDecimal(AmountObj, 'Amount')));
+                                    StatementNos.Add(StatementNo);
+                                    StatementDates.Add(StatementDate);
+                                    Used.Add(false);
+                                end;
+                            end;
+                    end;
+        end;
+        if LineKeys.Count() = 0 then
+            exit;
+
+        // Gathered first: linking one takes it out of the Statement No. filter being read.
+        Unlinked.CopyFilters(AlvysDeduction);
+        Unlinked.SetRange("Statement No.", 0);
+        if Unlinked.FindSet() then
+            repeat
+                EntryNos.Add(Unlinked."Entry No.");
+            until Unlinked.Next() = 0;
+
+        foreach EntryNo in EntryNos do
+            if Unlinked.Get(EntryNo) then
+                for i := 1 to LineKeys.Count() do
+                    if not Used.Get(i) then
+                        if LineKeys.Get(i) = StatementLineKey(Unlinked."Owner Operator Id", Unlinked.Description, Unlinked.Amount) then begin
+                            Used.Set(i, true);
+                            Unlinked."Statement No." := StatementNos.Get(i);
+                            Unlinked."Statement Date" := StatementDates.Get(i);
+                            Unlinked.Modify(true);
+                            break;
+                        end;
+    end;
+
+    local procedure StatementLineKey(DriverId: Text; Description: Text; Amount: Decimal): Text
+    begin
+        exit(UpperCase(DriverId) + '|' + Description.Trim() + '|' + Format(Amount, 0, 9));
+    end;
+
     local procedure ApplySettledDeductions()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -246,25 +409,42 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
         if not AlvysDeduction.Get(EntryNo) then
             exit;
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareFailedSettlementEntry(AlvysEntry, AlvysDeduction, WorkDate(), ErrorText, ErrorStack, 'GET', 'deductions/search');
+        AlvysSalesMgt.PrepareFailedSettlementEntry(AlvysEntry, AlvysDeduction, SettlementDate(AlvysDeduction), ErrorText, ErrorStack, 'GET', 'deductions/search');
         AlvysSalesMgt.InsertSettlementEntry(AlvysEntry);
         Commit();
     end;
 
     /// <summary>
-    /// Alvys reports no paid date, settlement date or settlement Id against a settled deduction, so
-    /// the payment posts under the work date of the run that found it. Only a settlement that went
-    /// through is marked applied; one that did not is left for the next run to try again.
+    /// Only a settlement that went through is marked applied; one that did not is left for the next
+    /// run to try again.
     /// </summary>
     internal procedure ApplySettledDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"): Text
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
     begin
         AlvysEntry.Init();
-        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, WorkDate(), 'GET', 'deductions/search');
+        AlvysSalesMgt.PrepareApplyDeductionEntry(AlvysEntry, AlvysDeduction, SettlementDate(AlvysDeduction), 'GET', 'deductions/search');
         AlvysSalesMgt.InsertSettlementEntry(AlvysEntry);
 
         exit(AlvysEntry."Error Message");
+    end;
+
+    /// <summary>
+    /// The date the payment posts on: the date of the statement that paid the deduction, or the work
+    /// date of the run applying it when no statement lists it. Never earlier than the invoice,
+    /// though: Business Central will not apply a payment to an invoice posted after it, and a
+    /// statement can be generated for a pay period that ended before the invoice was posted.
+    /// </summary>
+    local procedure SettlementDate(var AlvysDeduction: Record "BAASI Alvys Deduction") PostingDate: Date
+    var
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        PostingDate := AlvysDeduction."Statement Date";
+        if PostingDate = 0D then
+            PostingDate := WorkDate();
+        if SalesInvHeader.Get(AlvysDeduction."Posted Document No.") then
+            if PostingDate < SalesInvHeader."Posting Date" then
+                PostingDate := SalesInvHeader."Posting Date";
     end;
 
     local procedure SearchKey(DeductionId: Text): Text

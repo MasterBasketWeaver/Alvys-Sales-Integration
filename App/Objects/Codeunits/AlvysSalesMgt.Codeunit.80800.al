@@ -341,6 +341,31 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
     end;
 
     /// <summary>
+    /// One page of an owner operator's finalized settlement statements over a range of statement
+    /// dates. Alvys leaves out statements still being generated or reverted, and both ends of the
+    /// range are required. As with the deduction search, only a failed call is logged.
+    /// </summary>
+    procedure SearchDriverStatements(DriverId: Text; StartDate: Date; EndDate: Date; PageNo: Integer; PageSize: Integer; var ResponseObj: JsonObject; var ErrorText: Text): Boolean
+    var
+        DateRangeObj, JsonBody : JsonObject;
+        URL, RequestBody, ResponseText : Text;
+    begin
+        GetAndCheckSetup();
+        DateRangeObj.Add('Start', SearchTimestamp(StartDate, StartOfDayTok));
+        DateRangeObj.Add('End', SearchTimestamp(EndDate, EndOfDayTok));
+        JsonBody.Add('Page', PageNo);
+        JsonBody.Add('PageSize', PageSize);
+        JsonBody.Add('StatementDateRange', DateRangeObj);
+        if DriverId <> '' then
+            JsonBody.Add('DriverId', DriverId);
+        URL := AlvysSetup."Integration URL" + StatementSearchPathTok;
+        if SendAndParse('POST', URL, 'application/json', JsonBody, ResponseObj, RequestBody, ResponseText, ErrorText) then
+            exit(true);
+        InsertEntry(Enum::"BAASI Alvys Entry Doc. Type"::" ", '', URL, 'POST', RequestBody, ResponseText, ErrorText, false, true);
+        exit(false);
+    end;
+
+    /// <summary>
     /// Alvys returns effective dates at midnight, so an end bound taken at midnight too would drop
     /// the deductions dated that day.
     /// </summary>
@@ -386,6 +411,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         AlvysDeduction."Truck Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'TruckId'), 1, MaxStrLen(AlvysDeduction."Truck Id"));
         AlvysDeduction."Truck Number" := TruckNumber;
         AlvysDeduction."Driver Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'DriverId'), 1, MaxStrLen(AlvysDeduction."Driver Id"));
+        AlvysDeduction."Owner Operator Id" := CopyStr(JsonMgt.GetJsonValueAsText(ResponseObj, 'OwnerOperatorId'), 1, MaxStrLen(AlvysDeduction."Owner Operator Id"));
         AlvysDeduction.Date := DT2Date(JsonMgt.GetJsonValueAsDateTime(ResponseObj, 'Date'));
         AlvysDeduction."Is Paid" := JsonMgt.GetJsonValueAsBoolean(ResponseObj, 'IsPaid');
         AlvysDeduction."Remaining Amount" := AlvysDeduction.Amount;
@@ -1104,6 +1130,7 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
         DriverIdTok: Label 'DriverId', Locked = true;
         TrucksPathTok: Label 'trucks', Locked = true;
         DriversPathTok: Label 'drivers', Locked = true;
+        StatementSearchPathTok: Label 'driver-settlement-statements/search', Locked = true;
         UnexpectedListResponseErr: Label 'Alvys did not return a list of %1:\%2', Comment = '%1 = trucks or drivers, %2 = Response Text';
         MissingAssetIDErr: Label 'The %1 cannot be blank when creating a deduction.', Comment = '%1 = TruckId or DriverId';
         MissingDeductionIDErr: Label 'The deduction Id cannot be blank.';

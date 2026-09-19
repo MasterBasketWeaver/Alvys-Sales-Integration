@@ -171,6 +171,10 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         Assert.IsTrue(AlvysDeduction."Settlement Applied", 'The poll should have applied the settlement.');
         Assert.AreNotEqual(0DT, AlvysDeduction."Settlement Applied At", 'Applying the settlement should stamp when it happened.');
 
+        // [THEN] It was linked to the statement the web UI generated, which dates the payment
+        Assert.AreNotEqual(0, AlvysDeduction."Statement No.", 'The poll should have found the statement that paid the deduction.');
+        Assert.AreNotEqual(0D, AlvysDeduction."Statement Date", 'The linked statement should give the deduction a date.');
+
         // [THEN] The settlement was logged as polled rather than as a call Alvys made
         AlvysEntry.SetRange("Document No.", E2ERun."Posted Invoice No.");
         AlvysEntry.SetRange(Direction, AlvysEntry.Direction::Inbound);
@@ -206,6 +210,7 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         Assert.IsTrue(CustLedgEntry.FindLast(), 'Posting the settlement should create a customer payment entry.');
         CustLedgEntry.CalcFields(Amount);
         Assert.AreEqual(AlvysDeduction.Amount, CustLedgEntry.Amount, 'The posted payment should carry the settled amount.');
+        Assert.AreEqual(ExpectedPostingDate(AlvysDeduction, SalesInvHeader), CustLedgEntry."Posting Date", StrSubstNo('The payment should post on the date of statement %1.', AlvysDeduction."Statement No."));
 
         // [THEN] The invoice the chain started from is paid off and closed
         CustLedgEntry.Reset();
@@ -222,6 +227,17 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         E2ERun."Invoice Closed" := not CustLedgEntry.Open;
         E2ERun.Modify();
         Commit();
+    end;
+
+    /// <summary>
+    /// The statement's date, unless the statement is dated before the invoice, which Business
+    /// Central will not apply a payment to.
+    /// </summary>
+    local procedure ExpectedPostingDate(var AlvysDeduction: Record "BAASI Alvys Deduction"; var SalesInvHeader: Record "Sales Invoice Header"): Date
+    begin
+        if AlvysDeduction."Statement Date" < SalesInvHeader."Posting Date" then
+            exit(SalesInvHeader."Posting Date");
+        exit(AlvysDeduction."Statement Date");
     end;
 
     /// <summary>

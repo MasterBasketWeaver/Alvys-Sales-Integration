@@ -2074,6 +2074,486 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+    [Test]
+    procedure SettledDeductionIsLinkedToTheStatementThatPaidIt()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Statements: JsonArray;
+    begin
+        // [SCENARIO] A statement line carries no deduction Id, so a paid deduction is found on its
+        // owner operator's statement by its description and amount, and takes the statement's
+        // number and date.
+        Initialize();
+
+        // [GIVEN] A settled deduction, and two statements for its owner operator, one listing it
+        SettledDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        SetOwnerOperator(AlvysDeduction, OwnerOperatorTok);
+        AddStatement(Statements, 990001, WorkDate() - 7, OwnerOperatorTok, 'Some other deduction', -1.25);
+        AddStatement(Statements, 990002, WorkDate() - 1, OwnerOperatorTok, AlvysDeduction.Description, AlvysDeduction.Amount);
+
+        // [WHEN] The poll matches the statements
+        MatchOnly(AlvysDeduction, Statements);
+
+        // [THEN] The deduction is linked to the statement that lists it
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(990002, AlvysDeduction."Statement No.", 'The deduction should be linked to the statement that lists it.');
+        Assert.AreEqual(WorkDate() - 1, AlvysDeduction."Statement Date", 'The deduction should take the date of the statement that paid it.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure StatementLineIsNotMatchedAcrossOwnerOperatorsOrAmounts()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Statements: JsonArray;
+    begin
+        // [SCENARIO] The description alone is not enough: a line on another owner operator's
+        // statement, or for another amount, did not pay this deduction.
+        Initialize();
+
+        // [GIVEN] A settled deduction, and statements listing its description for another owner
+        // operator and for another amount
+        SettledDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        SetOwnerOperator(AlvysDeduction, OwnerOperatorTok);
+        AddStatement(Statements, 990003, WorkDate(), 'DR0000000000000000099', AlvysDeduction.Description, AlvysDeduction.Amount);
+        AddStatement(Statements, 990004, WorkDate(), OwnerOperatorTok, AlvysDeduction.Description, AlvysDeduction.Amount - 1);
+
+        // [WHEN] The poll matches the statements
+        MatchOnly(AlvysDeduction, Statements);
+
+        // [THEN] Neither is taken as its statement
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(0, AlvysDeduction."Statement No.", 'A line for another owner operator or amount should not be matched.');
+        Assert.AreEqual(0D, AlvysDeduction."Statement Date", 'An unmatched deduction should have no statement date.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure DeductionNoStatementListsPostsOnTheWorkDate()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        GenJnlLine: Record "Gen. Journal Line";
+        Statements: JsonArray;
+        WasAutoPost: Boolean;
+    begin
+        // [SCENARIO] A deduction marked paid in Alvys without a statement is still applied, on the
+        // work date of the run that applies it.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(false);
+
+        // [GIVEN] A settled deduction that no statement lists
+        SettledDeduction(OpenPostedInvoiceNo(), AlvysDeduction);
+        SetOwnerOperator(AlvysDeduction, OwnerOperatorTok);
+        AddStatement(Statements, 990005, WorkDate() - 3, OwnerOperatorTok, 'Some other deduction', -1.25);
+        MatchOnly(AlvysDeduction, Statements);
+
+        // [WHEN] It is applied
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+
+        // [THEN] Its payment is dated the work date
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", AlvysDeduction.Id);
+        Assert.IsTrue(GenJnlLine.FindFirst(), 'The settlement should be written to the payment journal.');
+        Assert.AreEqual(WorkDate(), GenJnlLine."Posting Date", 'A settlement no statement lists should post on the work date.');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure SettlementOnAFutureStatementDatePostsWithoutAWarning()
+    begin
+        // [SCENARIO] A statement is dated at the end of its pay period, which can be after the day
+        // the poll finds it. The payment posts on that date, with nothing asked of a user: the job
+        // queue has nobody to answer a confirmation, and this session raises on one.
+        Initialize();
+        PostOnStatementDate(OpenPostedInvoiceNo(), WorkDate() + 9, WorkDate() + 9);
+    end;
+
+    [Test]
+    procedure SettlementOnAStatementDatedBeforeTheInvoicePostsOnTheInvoiceDate()
+    var
+        SalesInvHeader: Record "Sales Invoice Header";
+    begin
+        // [SCENARIO] A statement can be generated for a pay period that ended before the invoice was
+        // posted, and Business Central refuses to apply a payment to an invoice posted after it. So
+        // the payment posts on the invoice's own date instead.
+        Initialize();
+        SalesInvHeader.Get(OpenPostedInvoiceNoPostableOnItsOwnDate());
+        PostOnStatementDate(SalesInvHeader."No.", SalesInvHeader."Posting Date" - 30, SalesInvHeader."Posting Date");
+    end;
+
+    [Test]
+    procedure SplitPartsAreLinkedToTheStatementsThatPaidThem()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Leaf: Record "BAASI Alvys Deduction";
+        CustLedgEntry: Record "Cust. Ledger Entry";
+        Items, Statements : JsonArray;
+        InvoiceNo: Code[20];
+        PartId, SiblingId, FirstSubPartId, SecondSubPartId, Description : Text;
+        FirstDate, SecondDate : Date;
+        WasAutoPost: Boolean;
+        Watermark: Integer;
+    begin
+        // [SCENARIO] Each part of a split, at any depth, is its own line on whichever statement paid
+        // it, named after the deduction with a "(part n)" for every split it went through. Each is
+        // linked to its own statement and posts on that statement's date; the parts that were split
+        // again have no statement of their own.
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(true);
+
+        // [GIVEN] A deduction of -1.25 split into -0.75 and -0.50, and the -0.75 split into -0.50
+        // and -0.25, the way Alvys names the parts
+        InvoiceNo := OpenPostedInvoiceNo();
+        UnpaidDeduction(InvoiceNo, AlvysDeduction);
+        SetOwnerOperator(AlvysDeduction, OwnerOperatorTok);
+        Description := AlvysDeduction.Description;
+        PartId := AlvysStyleId();
+        SiblingId := AlvysStyleId();
+        AddPartItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false, Description + '  (part 1)');
+        AddPartItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false, Description + '  (part 2)');
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        FirstSubPartId := AlvysStyleId();
+        SecondSubPartId := AlvysStyleId();
+        Clear(Items);
+        AddPartItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, false, Description + '  (part 1) (part 1)');
+        AddPartItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, false, Description + '  (part 1) (part 2)');
+        AddPartItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, false, Description + '  (part 2)');
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [GIVEN] All three leaves paid, two on one statement and the third on a later one
+        Clear(Items);
+        AddPartItem(Items, FirstSubPartId, AlvysDeduction."Group Id", -0.5, true, Description + '  (part 1) (part 1)');
+        AddPartItem(Items, SecondSubPartId, AlvysDeduction."Group Id", -0.25, true, Description + '  (part 1) (part 2)');
+        AddPartItem(Items, SiblingId, AlvysDeduction."Group Id", -0.5, true, Description + '  (part 2)');
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        FirstDate := WorkDate() - 2;
+        SecondDate := WorkDate() + 5;
+        AddStatement(Statements, 990010, FirstDate, OwnerOperatorTok, Description + '  (part 1) (part 1)', -0.5);
+        AddStatementLine(Statements, 990010, Description + '  (part 2)', -0.5);
+        AddStatement(Statements, 990011, SecondDate, OwnerOperatorTok, Description + '  (part 1) (part 2)', -0.25);
+
+        // [WHEN] The poll matches the statements over what it would apply
+        Leaf.SetRange("Group Id", AlvysDeduction."Group Id");
+        Leaf.SetRange("Is Paid", true);
+        Leaf.SetRange("Settlement Applied", false);
+        Leaf.SetRange("Split in Alvys", false);
+        AlvysSettlementPoll.MatchStatements(Leaf, Statements);
+
+        // [THEN] Each leaf is linked to its own statement
+        AssertLinked(AlvysDeduction, FirstSubPartId, PartId, 990010, FirstDate);
+        AssertLinked(AlvysDeduction, SecondSubPartId, PartId, 990011, SecondDate);
+        AssertLinked(AlvysDeduction, SiblingId, '', 990010, FirstDate);
+
+        // [THEN] Neither the deduction nor the part split again is linked: they were never on a statement
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(0, AlvysDeduction."Statement No.", 'The deduction that was split should not be linked to a statement.');
+        FindSplitPart(AlvysDeduction, PartId, SplitPart);
+        Assert.AreEqual(0, SplitPart."Statement No.", 'A part that was split again should not be linked to a statement.');
+
+        // [WHEN] Each leaf is applied and posted
+        Watermark := LastCustLedgerEntryNo();
+        Leaf.FindSet();
+        repeat
+            AlvysSettlementPoll.ApplySettledDeduction(Leaf);
+        until Leaf.Next() = 0;
+
+        // [THEN] Each payment is posted on the date of the statement that paid its part
+        CustLedgEntry.SetRange("Customer No.", BillToCustomerNo(InvoiceNo));
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Payment);
+        CustLedgEntry.SetFilter("Entry No.", '>%1', Watermark);
+        Assert.AreEqual(3, CustLedgEntry.Count(), 'Each leaf should be posted as its own payment.');
+        CustLedgEntry.SetRange("Posting Date", FirstDate);
+        Assert.AreEqual(2, CustLedgEntry.Count(), 'The two leaves on the first statement should post on its date.');
+        CustLedgEntry.SetRange("Posting Date", SecondDate);
+        Assert.AreEqual(1, CustLedgEntry.Count(), 'The leaf on the later statement should post on its date.');
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    [Test]
+    procedure DriverStatementSearchReturnsFinalizedStatements()
+    var
+        ResponseObj, StatementObj : JsonObject;
+        JsonTkn: JsonToken;
+        ErrorText: Text;
+        StatementDate: Date;
+    begin
+        // [SCENARIO] The live statement search answers for an owner operator with statements, in the
+        // shape the poll reads.
+        Initialize();
+
+        // [WHEN] The sandbox's test owner operator's statements are searched
+        Assert.IsTrue(AlvysSalesMgt.SearchDriverStatements(SandboxOwnerOperatorTok, 20200101D, 20301231D, 0, 100, ResponseObj, ErrorText), StrSubstNo('The statement search should succeed: %1', ErrorText));
+
+        // [THEN] Statements come back with a number and a date
+        Assert.IsTrue(JsonMgt.GetJsonValueAsInteger(ResponseObj, 'Total') > 0, 'The test owner operator should have settlement statements.');
+        ResponseObj.Get('Items', JsonTkn);
+        JsonTkn.AsArray().Get(0, JsonTkn);
+        StatementObj := JsonTkn.AsObject();
+        Assert.AreNotEqual(0, JsonMgt.GetJsonValueAsInteger(StatementObj, 'Number'), 'A statement should carry its number.');
+        Assert.IsTrue(Evaluate(StatementDate, JsonMgt.GetJsonValueAsText(StatementObj, 'StatementDate'), 9), 'A statement date should read as a date.');
+    end;
+
+    [Test]
+    procedure LiveSplitAndMultiSplitPartsFindTheirStatements()
+    var
+        Deductions: Record "BAASI Alvys Deduction";
+        ResponseObj: JsonObject;
+        JsonTkn: JsonToken;
+        Items: JsonArray;
+        SingleEntryNo, MultiEntryNo, WholeEntryNo : Integer;
+    begin
+        // [SCENARIO] Against the live sandbox, with nothing simulated: deductions split once and split
+        // twice in the Alvys UI, and settled on two real statements, are logged part by part and each
+        // leaf is linked to the statement that actually paid it.
+        //
+        // The fixture was built on 2026-09-18 on Adam Test's truck 12345 and is permanent, since a
+        // paid deduction cannot be deleted in Alvys:
+        //   PROBE01 -100 split into -60 / -40
+        //   PROBE02 -300 split into -200 / -100, and the -200 split again into -120 / -80
+        //   PROBE03 -25 never split
+        // Statement 1000017 (dated 2026-09-20) paid PROBE01 part 1, PROBE02 part 1 part 1 and PROBE03;
+        // statement 1000018 (dated 2026-09-27) paid the other three leaves.
+        Initialize();
+
+        // [GIVEN] The probe deductions as Business Central would have logged them when it raised them
+        ResponseObj := AlvysSalesMgt.SearchDeductions(20260918D, 20260918D, true, 0, 100);
+        ResponseObj.Get('Items', JsonTkn);
+        Items := JsonTkn.AsArray();
+        SingleEntryNo := InsertProbeDeduction(Items, 'PSI-PROBE01 FR Repair Order 99901', -100, false);
+        MultiEntryNo := InsertProbeDeduction(Items, 'PSI-PROBE02 FR Repair Order 99902', -300, false);
+        WholeEntryNo := InsertProbeDeduction(Items, 'PSI-PROBE03 FR Repair Order 99903', -25, true);
+
+        // [WHEN] The poll refreshes them from the live search and links them to the live statements
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        Deductions.SetFilter("Entry No.", '>=%1', SingleEntryNo);
+        Deductions.SetRange("Is Paid", true);
+        Deductions.SetRange("Split in Alvys", false);
+        AlvysSettlementPoll.LinkStatements(Deductions);
+
+        // [THEN] Each leaf is linked to the statement that paid it
+        AssertProbeLeaf(SingleEntryNo, '(part 1)', 1000017, 20260920D);
+        AssertProbeLeaf(SingleEntryNo, '(part 2)', 1000018, 20260927D);
+        AssertProbeLeaf(MultiEntryNo, '(part 1) (part 1)', 1000017, 20260920D);
+        AssertProbeLeaf(MultiEntryNo, '(part 1) (part 2)', 1000018, 20260927D);
+        AssertProbeLeaf(MultiEntryNo, '(part 2)', 1000018, 20260927D);
+        Deductions.Reset();
+        Deductions.Get(WholeEntryNo);
+        Assert.AreEqual(1000017, Deductions."Statement No.", 'The deduction never split should be linked to the statement that paid it.');
+        Assert.AreEqual(20260920D, Deductions."Statement Date", 'The deduction never split should take its statement''s date.');
+
+        // [THEN] The deductions that were split carry no statement of their own
+        Deductions.Get(SingleEntryNo);
+        Assert.AreEqual(0, Deductions."Statement No.", 'A split deduction should not be linked to a statement.');
+        Deductions.Get(MultiEntryNo);
+        Assert.AreEqual(0, Deductions."Statement No.", 'A split deduction should not be linked to a statement.');
+    end;
+
+    /// <summary>
+    /// Logs a probe deduction the way posting an invoice would have. A deduction that was split no
+    /// longer exists in Alvys under any Id, so it is given one of its own and found again by its
+    /// group, which its parts keep; the one never split keeps its real Id.
+    /// </summary>
+    local procedure InsertProbeDeduction(var Items: JsonArray; DescriptionTail: Text; Amount: Decimal; Whole: Boolean): Integer
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        ItemObj: JsonObject;
+        ItemTkn: JsonToken;
+        EntryNo: Integer;
+        Description: Text;
+    begin
+        Description := 'BC Invoice TTG ' + DescriptionTail + ' ';
+        foreach ItemTkn in Items do begin
+            ItemObj := ItemTkn.AsObject();
+            if JsonMgt.GetJsonValueAsText(ItemObj, 'Description').StartsWith(Description.Trim()) then begin
+                if AlvysDeduction.FindLast() then
+                    EntryNo := AlvysDeduction."Entry No.";
+                AlvysDeduction.Init();
+                AlvysDeduction."Entry No." := EntryNo + 1;
+                if Whole then
+                    AlvysDeduction.Id := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'Id'), 1, MaxStrLen(AlvysDeduction.Id))
+                else
+                    AlvysDeduction.Id := CopyStr(AlvysStyleId(), 1, MaxStrLen(AlvysDeduction.Id));
+                AlvysDeduction."Group Id" := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'GroupId'), 1, MaxStrLen(AlvysDeduction."Group Id"));
+                AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
+                AlvysDeduction.Amount := Amount;
+                AlvysDeduction."Remaining Amount" := Amount;
+                AlvysDeduction.Date := 20260918D;
+                AlvysDeduction."Owner Operator Id" := SandboxOwnerOperatorTok;
+                AlvysDeduction."Document Type" := AlvysDeduction."Document Type"::"Sales Invoice";
+                AlvysDeduction."Posted Document No." := OpenPostedInvoiceNo();
+                AlvysDeduction.Insert(true);
+                exit(AlvysDeduction."Entry No.");
+            end;
+        end;
+        Assert.Fail(StrSubstNo('The live probe deduction %1 was not returned by the deduction search.', DescriptionTail));
+    end;
+
+    /// <summary>
+    /// Alvys names a part by adding " (part n)" to the description of what it split, and the
+    /// description Business Central sends ends in a space, so the spacing is compared loosely.
+    /// </summary>
+    local procedure AssertProbeLeaf(DeductionEntryNo: Integer; PartSuffix: Text; StatementNo: Integer; StatementDate: Date)
+    var
+        Split, Leaf : Record "BAASI Alvys Deduction";
+        Found: Boolean;
+    begin
+        Split.Get(DeductionEntryNo);
+        Leaf.SetRange("Split From Entry No.", DeductionEntryNo);
+        if Leaf.FindSet() then
+            repeat
+                Found := DelChr(Leaf.Description, '=', ' ') = DelChr(Split.Description + PartSuffix, '=', ' ');
+                if not Found then
+                    if Leaf.Next() = 0 then
+                        break;
+            until Found;
+        Assert.IsTrue(Found, StrSubstNo('Part %1 %2 should be logged.', Split.Description, PartSuffix));
+        Assert.AreEqual(StatementNo, Leaf."Statement No.", StrSubstNo('%1 should be linked to statement %2.', Leaf.Description, StatementNo));
+        Assert.AreEqual(StatementDate, Leaf."Statement Date", StrSubstNo('%1 should take the date of statement %2.', Leaf.Description, StatementNo));
+    end;
+
+    local procedure PostOnStatementDate(InvoiceNo: Code[20]; StatementDate: Date; ExpectedPostingDate: Date)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        AlvysEntry: Record "BAASI Alvys Sales Entry";
+        CustLedgEntry: Record "Cust. Ledger Entry";
+        Statements: JsonArray;
+        WasAutoPost: Boolean;
+    begin
+        Initialize();
+        RequireJournalSetup();
+        ClearSettlementBatch();
+        WasAutoPost := SetAutoPostDeductions(true);
+
+        // [GIVEN] A settled deduction whose statement is dated as given
+        SettledDeduction(InvoiceNo, AlvysDeduction);
+        SetOwnerOperator(AlvysDeduction, OwnerOperatorTok);
+        AddStatement(Statements, 990020, StatementDate, OwnerOperatorTok, AlvysDeduction.Description, AlvysDeduction.Amount);
+        MatchOnly(AlvysDeduction, Statements);
+
+        // [WHEN] It is applied, with the batch posted straight away the way a scheduled run does
+        AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+
+        // [THEN] It posted cleanly, on the date expected
+        AlvysEntry.FindLast();
+        Assert.AreEqual('', AlvysEntry."Error Message", StrSubstNo('A settlement dated %1 should post cleanly: %2', StatementDate, AlvysEntry."Error Message"));
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Settlement Posted", 'The settlement should have been posted.');
+        CustLedgEntry.SetRange("Customer No.", BillToCustomerNo(InvoiceNo));
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Payment);
+        Assert.IsTrue(CustLedgEntry.FindLast(), 'Posting the settlement should create a customer payment entry.');
+        Assert.AreEqual(ExpectedPostingDate, CustLedgEntry."Posting Date", StrSubstNo('A settlement on a statement dated %1 should post on %2.', StatementDate, ExpectedPostingDate));
+
+        SetAutoPostDeductions(WasAutoPost);
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    local procedure MatchOnly(var AlvysDeduction: Record "BAASI Alvys Deduction"; var Statements: JsonArray)
+    var
+        Deductions: Record "BAASI Alvys Deduction";
+    begin
+        Deductions.SetRange("Entry No.", AlvysDeduction."Entry No.");
+        AlvysSettlementPoll.MatchStatements(Deductions, Statements);
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+    end;
+
+    local procedure SetOwnerOperator(var AlvysDeduction: Record "BAASI Alvys Deduction"; OwnerOperatorId: Text)
+    begin
+        AlvysDeduction."Owner Operator Id" := CopyStr(OwnerOperatorId, 1, MaxStrLen(AlvysDeduction."Owner Operator Id"));
+        AlvysDeduction.Modify(true);
+    end;
+
+    local procedure AssertLinked(var AlvysDeduction: Record "BAASI Alvys Deduction"; LeafId: Text; ParentPartId: Text; StatementNo: Integer; StatementDate: Date)
+    var
+        Parent, Leaf : Record "BAASI Alvys Deduction";
+    begin
+        if ParentPartId = '' then
+            FindSplitPart(AlvysDeduction, LeafId, Leaf)
+        else begin
+            FindSplitPart(AlvysDeduction, ParentPartId, Parent);
+            FindSplitPart(Parent, LeafId, Leaf);
+        end;
+        Assert.AreEqual(StatementNo, Leaf."Statement No.", StrSubstNo('%1 should be linked to statement %2.', Leaf.Description, StatementNo));
+        Assert.AreEqual(StatementDate, Leaf."Statement Date", StrSubstNo('%1 should take the date of statement %2.', Leaf.Description, StatementNo));
+    end;
+
+    /// <summary>
+    /// A part of a split in the shape deductions/search returns it, with the description and owner
+    /// operator a statement is matched on.
+    /// </summary>
+    local procedure AddPartItem(var Items: JsonArray; Id: Text; GroupId: Text; Amount: Decimal; IsPaid: Boolean; Description: Text)
+    var
+        ItemObj, AmountObj : JsonObject;
+    begin
+        AmountObj.Add('Amount', Amount);
+        AmountObj.Add('Currency', 840);
+        ItemObj.Add('Id', Id);
+        ItemObj.Add('Type', 'Deduction');
+        ItemObj.Add('GroupId', GroupId);
+        ItemObj.Add('Description', Description);
+        ItemObj.Add('OwnerOperatorId', OwnerOperatorTok);
+        ItemObj.Add('Amount', AmountObj);
+        ItemObj.Add('IsPaid', IsPaid);
+        Items.Add(ItemObj);
+    end;
+
+    /// <summary>
+    /// A statement in the shape driver-settlement-statements/search returns it, with one deduction
+    /// line. Alvys has no API to generate a statement, so they are simulated here.
+    /// </summary>
+    local procedure AddStatement(var Statements: JsonArray; Number: Integer; StatementDate: Date; DriverId: Text; Description: Text; Amount: Decimal)
+    var
+        StatementObj, DriverObj, LineObj : JsonObject;
+        LineItems, SubLines : JsonArray;
+    begin
+        DriverObj.Add('Id', DriverId);
+        DriverObj.Add('Type', 'OWNER_OPERATOR');
+        LineObj.Add('Category', 'Deduction');
+        LineObj.Add('Title', 'Owner Operator Invoice - Deduction');
+        LineObj.Add('SubLines', SubLines);
+        LineItems.Add(LineObj);
+        StatementObj.Add('Number', Number);
+        StatementObj.Add('Status', 'Processed');
+        StatementObj.Add('StatementDate', Format(StatementDate, 0, 9));
+        StatementObj.Add('Driver', DriverObj);
+        StatementObj.Add('LineItems', LineItems);
+        Statements.Add(StatementObj);
+        AddStatementLine(Statements, Number, Description, Amount);
+    end;
+
+    local procedure AddStatementLine(var Statements: JsonArray; Number: Integer; Description: Text; Amount: Decimal)
+    var
+        StatementObj, LineObj, SubLineObj, AmountObj : JsonObject;
+        StatementTkn, JsonTkn : JsonToken;
+    begin
+        AmountObj.Add('Amount', Amount);
+        AmountObj.Add('Currency', 840);
+        SubLineObj.Add('Description', Description);
+        SubLineObj.Add('Quantity', '1');
+        SubLineObj.Add('Amount', AmountObj);
+        foreach StatementTkn in Statements do begin
+            StatementObj := StatementTkn.AsObject();
+            if JsonMgt.GetJsonValueAsInteger(StatementObj, 'Number') = Number then begin
+                StatementObj.Get('LineItems', JsonTkn);
+                JsonTkn.AsArray().Get(0, JsonTkn);
+                LineObj := JsonTkn.AsObject();
+                LineObj.Get('SubLines', JsonTkn);
+                JsonTkn.AsArray().Add(SubLineObj);
+                exit;
+            end;
+        end;
+        Assert.Fail(StrSubstNo('No statement %1 to add a line to.', Number));
+    end;
+
     /// <summary>
     /// Applies the parts of a four-deep chain one at a time, checking after each what is left to
     /// apply on the part itself, on every part it was split out of, and on the deduction Business
@@ -2499,6 +2979,28 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// the payment side posts. The payment line takes its dimensions from the invoice, so an invoice
     /// that does not carry them cannot produce a postable line however the journal is configured.
     /// </summary>
+    /// <summary>
+    /// An open invoice whose own posting date is still inside the allowed posting range, for a test
+    /// whose payment is posted on the invoice's date.
+    /// </summary>
+    local procedure OpenPostedInvoiceNoPostableOnItsOwnDate(): Code[20]
+    var
+        CustLedgEntry: Record "Cust. Ledger Entry";
+        SalesInvHeader: Record "Sales Invoice Header";
+        UserSetupMgt: Codeunit "User Setup Management";
+    begin
+        CustLedgEntry.SetRange("Document Type", CustLedgEntry."Document Type"::Invoice);
+        CustLedgEntry.SetRange(Open, true);
+        if CustLedgEntry.FindSet() then
+            repeat
+                if SalesInvHeader.Get(CustLedgEntry."Document No.") then
+                    if UserSetupMgt.IsPostingDateValid(SalesInvHeader."Posting Date") then
+                        if PaymentDimensionsWouldPost(SalesInvHeader) then
+                            exit(SalesInvHeader."No.");
+            until CustLedgEntry.Next() = 0;
+        Assert.Fail('The company needs an open posted sales invoice dated inside the allowed posting range whose dimensions satisfy both the customer and the settlement balancing account.');
+    end;
+
     local procedure OpenPostedInvoiceNo(): Code[20]
     var
         CustLedgEntry: Record "Cust. Ledger Entry";
@@ -2795,4 +3297,6 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         JsonMgt: Codeunit "BAAPI Json Mgt.";
         TestMode: Codeunit "BAASIT Test Mode";
         PostedDocumentNoMissingTxt: Label 'must have a Posted Document No. specified before it can be applied.', Locked = true;
+        OwnerOperatorTok: Label 'DRTEST0000000000000001', Locked = true;
+        SandboxOwnerOperatorTok: Label 'DR2516397705002552078', Locked = true;
 }
