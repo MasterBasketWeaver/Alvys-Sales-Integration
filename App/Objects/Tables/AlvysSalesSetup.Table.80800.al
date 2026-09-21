@@ -64,7 +64,7 @@ table 80800 "BAASI Alvys Sales Setup"
         {
             DataClassification = CustomerContent;
             TableRelation = "Gen. Journal Template".Name;
-            Tooltip = 'The general journal template a settled deduction is written to.';
+            Tooltip = 'The journal template a settled deduction is imported to.';
 
             trigger OnValidate()
             begin
@@ -78,12 +78,12 @@ table 80800 "BAASI Alvys Sales Setup"
         {
             DataClassification = CustomerContent;
             TableRelation = "Gen. Journal Batch".Name where("Journal Template Name" = field("Payment Journal Template"));
-            Tooltip = 'The general journal batch a settled deduction is written to.';
+            Tooltip = 'The journal batch a settled deduction is imported to.';
         }
         field(14; "Auto-Post Deductions"; Boolean)
         {
             DataClassification = CustomerContent;
-            Tooltip = 'Specifies whether the payment journal batch is posted as soon as a settled deduction is written to it.';
+            Tooltip = 'Specifies whether the payment journal batch is posted as soon as a settled deduction imported into it.';
         }
     }
     keys
