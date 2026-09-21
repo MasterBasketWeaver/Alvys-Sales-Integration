@@ -21,15 +21,17 @@ page 80800 "BAASI Alvys Sales Setup"
                     // }
                     field("Driver Code Dimension"; Rec."Driver Code Dimension") { }
                 }
-                group("Payment Journal")
+                group("Import Payment Journal")
                 {
-                    field("Payment Journal Template"; Rec."Payment Journal Template")
+                    field("Journal Template"; Rec."Payment Journal Template")
                     {
                         ShowMandatory = true;
+                        Caption = 'Journal Template';
                     }
-                    field("Payment Journal Batch"; Rec."Payment Journal Batch")
+                    field("Journal Batch"; Rec."Payment Journal Batch")
                     {
                         ShowMandatory = true;
+                        Caption = 'Journal Batch';
                     }
                     field("Bal. Account No."; Rec."Bal. Account No.")
                     {
