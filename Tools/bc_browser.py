@@ -16,7 +16,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
-ENV = "MCSandbox_061226"
+ENV = "MCSandbox_09222026"
 from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT  # above the repo: kept out of git

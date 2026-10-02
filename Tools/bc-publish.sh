@@ -7,7 +7,7 @@ set -euo pipefail
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$BASE")"
 TENANT="0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
-ENV="MCSandbox_061226"
+ENV="MCSandbox_09222026"
 REPO="${1:-$ROOT/App}"
 # synchronize keeps existing data; forcesync allows destructive schema changes (dropped fields).
 SCHEMA_MODE="${SCHEMA_MODE:-synchronize}"

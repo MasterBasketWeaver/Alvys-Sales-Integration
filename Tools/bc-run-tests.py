@@ -7,13 +7,14 @@ The run is synchronous: the POST returns once every test has finished. Per-metho
 then read back from the alvysTestResults entity (page 89953). No browser involved -- this is
 the way to run the suite; do not drive page 89951 in the web client.
 """
+import os
 import sys
 
 import requests
 from bc_auth import get_access_token
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
-ENV = "MCSandbox_061226"
+ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
 COMPANY = "Texas Transportation Group"
 API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/bryana/alvys/v1.0"
 BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2.0"

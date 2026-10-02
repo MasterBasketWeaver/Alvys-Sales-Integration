@@ -9,7 +9,7 @@ import os
 import time
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
-ENV = "MCSandbox_061226"
+ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
 # These scripts live in the repo, but the browser profile, credentials and any screenshots
 # they write belong to the project root above it, which is not version controlled.
 from project_paths import PROJECT_ROOT, TOOLS

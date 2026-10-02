@@ -42,7 +42,7 @@ from bc_auth import get_access_token
 from project_paths import PROJECT_ROOT
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
-ENV = "MCSandbox_061226"
+ENV = "MCSandbox_09222026"
 COMPANY = "Texas Transportation Group"
 API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/bryana/alvys/v1.0"
 BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2.0"
