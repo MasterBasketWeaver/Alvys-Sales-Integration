@@ -6,8 +6,10 @@ and the token carries no deduction:update scope -- so settling one has to go thr
 This drives the Driver Settlements module to do that: approve the deduction into a draft statement
 and generate the statement, which is what turns IsPaid over.
 
-The session lives in the .alvysprofile persistent Chromium profile in the project root, signed in
-once with "Remember this device for 30 days"; see alvys-login.py when that lapses.
+The session lives in the .alvysprofile persistent Chromium profile in the project root. An expired
+session is signed back in from alvys_credentials without asking anything, as long as the profile
+still remembers this device for MFA ("Remember this device for 30 days"). When that lapses Alvys
+asks for an authenticator code, which only the user has; alvys-login.py takes it.
 """
 import os
 import re
@@ -18,7 +20,9 @@ from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT
 PROFILE = os.path.join(BASE, ".alvysprofile")
+CREDS = os.path.join(BASE, "alvys_credentials")
 SETTLEMENTS_URL = "https://app.alvys.com/accounting/driver-settlements"
+OTP_URL_PART = "mfa-otp-challenge"
 
 
 def log(*a):
@@ -34,11 +38,62 @@ def open_context(pw, headless=True):
     return ctx, page
 
 
+def at_login(page):
+    return "login" in page.url or "auth0" in page.url
+
+
+def _visible(page, selectors):
+    for sel in selectors:
+        loc = page.locator(sel)
+        for i in range(loc.count()):
+            if loc.nth(i).is_visible():
+                return loc.nth(i)
+    return None
+
+
+def sign_in(page, code=None):
+    """Sign in on the Auth0 page the app redirected to: username, then password, then the
+    authenticator code if Alvys asks for one. Without a code, a code prompt is an error naming
+    alvys-login.py, since only the user can supply it."""
+    with open(CREDS) as f:
+        user, pwd = [ln.strip() for ln in f if ln.strip()][:2]
+    field = _visible(page, ["input[name=username]"])
+    if field:
+        field.fill(user)
+        field.press("Enter")
+        page.wait_for_timeout(6000)
+    field = _visible(page, ["input[name=password]"])
+    if field:
+        field.fill(pwd)
+        field.press("Enter")
+        page.wait_for_timeout(10000)
+    if OTP_URL_PART in page.url:
+        if not code:
+            raise RuntimeError("Alvys wants an authenticator code; run Tools/alvys-login.py <code>.")
+        field = _visible(page, ["input[name=code]", "input[autocomplete=one-time-code]"])
+        field.fill(code)
+        remember = _visible(page, ["input[name=rememberBrowser]"])
+        # The checkbox's styled label sits over it and takes real clicks.
+        if remember and not remember.is_checked():
+            remember.evaluate("e => e.click()")
+        field.press("Enter")
+    for _ in range(40):
+        if not at_login(page):
+            break
+        page.wait_for_timeout(1000)
+    if at_login(page):
+        raise RuntimeError(f"Alvys sign-in did not complete; still at {page.url.split('?')[0]}")
+    page.wait_for_timeout(8000)
+
+
 def goto_settlements(page, tab="Open"):
     page.goto(SETTLEMENTS_URL, wait_until="domcontentloaded", timeout=120000)
     page.wait_for_timeout(15000)
-    if "login" in page.url or "auth0" in page.url:
-        raise RuntimeError("Alvys session has expired; run tools/alvys-login.py to sign in again.")
+    if at_login(page):
+        log("[alvys] session expired - signing in again...")
+        sign_in(page)
+        page.goto(SETTLEMENTS_URL, wait_until="domcontentloaded", timeout=120000)
+        page.wait_for_timeout(15000)
     if tab != "Open":
         page.click(f"text={tab}", timeout=20000)
         page.wait_for_timeout(6000)
