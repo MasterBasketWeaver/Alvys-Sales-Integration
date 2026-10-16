@@ -28,6 +28,7 @@ Nothing rolls back. The repair orders, invoices, deductions and statements stay 
 systems.
 """
 import json
+import os
 import sys
 import time
 import urllib.parse
@@ -43,7 +44,7 @@ from project_paths import PROJECT_ROOT
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = "MCSandbox_09222026"
-COMPANY = "Texas Transportation Group"
+COMPANY = os.environ.get("BC_COMPANY", "Alvy's Test")
 API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/bryana/alvys/v1.0"
 BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2.0"
 FLEETROCK = "https://test.fleetrock.com/API"
@@ -69,7 +70,7 @@ def die(msg, resp=None):
 class BC:
     def __init__(self):
         self.h = {"Authorization": f"Bearer {get_access_token(interactive=False)}", "Content-Type": "application/json"}
-        r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY}'", headers=self.h, timeout=120)
+        r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY.replace("'", "''")}'", headers=self.h, timeout=120)
         if r.status_code != 200 or not r.json().get("value"):
             die("company lookup", r)
         self.company = r.json()["value"][0]["id"]

@@ -15,7 +15,7 @@ from bc_auth import get_access_token
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
-COMPANY = "Texas Transportation Group"
+COMPANY = os.environ.get("BC_COMPANY", "Alvy's Test")
 API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/bryana/alvys/v1.0"
 BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2.0"
 
@@ -33,7 +33,7 @@ def die(resp, what):
 
 
 # --- Company id ---
-r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY}'", headers=headers, timeout=120)
+r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY.replace("'", "''")}'", headers=headers, timeout=120)
 if r.status_code != 200:
     die(r, "company lookup")
 companies = r.json().get("value", [])

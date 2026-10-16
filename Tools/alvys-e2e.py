@@ -29,6 +29,7 @@ poll mode or --auto-post explicitly runs every combination of what was named ins
 
 Nothing rolls back. The invoice, the deduction and the repair order stay in all three systems.
 """
+import os
 import sys
 
 import requests
@@ -39,7 +40,7 @@ from bc_auth import get_access_token
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = "MCSandbox_09222026"
-COMPANY = "Texas Transportation Group"
+COMPANY = os.environ.get("BC_COMPANY", "Alvy's Test")
 API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/bryana/alvys/v1.0"
 BASE_API = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}/api/v2.0"
 
@@ -70,7 +71,7 @@ def die(msg, resp=None):
 class BC:
     def __init__(self):
         self.h = {"Authorization": f"Bearer {get_access_token()}", "Content-Type": "application/json"}
-        r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY}'", headers=self.h, timeout=120)
+        r = requests.get(f"{BASE_API}/companies?$filter=name eq '{COMPANY.replace("'", "''")}'", headers=self.h, timeout=120)
         if r.status_code != 200:
             die("company lookup", r)
         companies = r.json().get("value", [])
