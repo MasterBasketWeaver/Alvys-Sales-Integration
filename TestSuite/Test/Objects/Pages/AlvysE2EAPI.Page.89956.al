@@ -221,6 +221,78 @@ page 89956 "BAASIT Alvys E2E API"
     end;
 
     /// <summary>
+    /// Previews posting the Alvys payment journal batch the way auto-posting calls it, with
+    /// codeunit "BAASIT Post Batch Diag" recording the journal line at each checkpoint of the
+    /// posting. Nothing is posted. The checkpoints are read back from alvysTestResults.
+    /// </summary>
+    [ServiceEnabled]
+    procedure diagnosePostBatch(var ActionContext: WebServiceActionContext)
+    var
+        PostBatchDiag: Codeunit "BAASIT Post Batch Diag";
+    begin
+        PostBatchDiag.Start();
+        DiagnosePaymentBatch(ActionContext);
+    end;
+
+    local procedure DiagnosePaymentBatch(var ActionContext: WebServiceActionContext)
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        GenJnlLine: Record "Gen. Journal Line";
+        PostBatchDiag: Codeunit "BAASIT Post Batch Diag";
+        Posted: Boolean;
+    begin
+        AlvysSetup.Get();
+        GenJnlLine.SetRange("Journal Template Name", AlvysSetup."Payment Journal Template");
+        GenJnlLine.SetRange("Journal Batch Name", AlvysSetup."Payment Journal Batch");
+        PostBatchDiag.Resume();
+        if GenJnlLine.FindFirst() then begin
+            PostBatchDiag.Add('Before posting', PostBatchDiag.Describe(GenJnlLine));
+            Commit();
+            ClearLastError();
+            Posted := Codeunit.Run(Codeunit::"BAASIT Post Batch Diag Run", GenJnlLine);
+            PostBatchDiag.Add('Preview result', StrSubstNo('Codeunit.Run returned %1; last error: %2', Posted, GetLastErrorText()));
+        end else
+            PostBatchDiag.Add('Before posting', 'The payment journal batch has no lines.');
+        PostBatchDiag.Stop();
+        PostBatchDiag.WriteResults();
+        Commit();
+        Rec.GetSingleton();
+        SetActionContext(ActionContext);
+    end;
+
+    /// <summary>
+    /// Writes a logged deduction's settlement line again through the poll's own apply step, so a
+    /// change to how the line is built can be tried on a deduction already settled in Alvys, then
+    /// diagnoses the batch as diagnosePostBatch does. The deduction's earlier line is removed and its
+    /// applied state cleared first. Posting follows the setup's Auto-Post Deductions.
+    /// </summary>
+    [ServiceEnabled]
+    procedure reapplySettlement(entryNo: Integer; var ActionContext: WebServiceActionContext)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        GenJnlLine: Record "Gen. Journal Line";
+        AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
+        PostBatchDiag: Codeunit "BAASIT Post Batch Diag";
+        ApplyError: Text;
+    begin
+        AlvysDeduction.Get(entryNo);
+        GenJnlLine.SetRange("BAASI Alvys Deduction Id", AlvysDeduction.Id);
+        GenJnlLine.DeleteAll(true);
+        AlvysDeduction."Settlement Applied" := false;
+        AlvysDeduction."Settlement Applied At" := 0DT;
+        AlvysDeduction."Remaining Amount" := AlvysDeduction.Amount;
+        AlvysDeduction.Modify();
+        Commit();
+
+        PostBatchDiag.Start();
+        ApplyError := AlvysSettlementPoll.ApplySettledDeduction(AlvysDeduction);
+        PostBatchDiag.Add('Reapplied', StrSubstNo('apply error: %1', ApplyError));
+        Commit();
+
+        DiagnosePaymentBatch(ActionContext);
+    end;
+
+    /// <summary>
     /// Unpicks split parts logged against a deduction they never belonged to. A part of a split carries the Group Id of the deduction it came from, so
     /// a logged part whose Group Id is not the parent's was never in that group -- which is what a
     /// poll before the grouping fix produced, attaching everything the deduction search returned to

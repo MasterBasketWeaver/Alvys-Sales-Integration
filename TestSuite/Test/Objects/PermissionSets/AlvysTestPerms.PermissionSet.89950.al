@@ -32,5 +32,7 @@ permissionset 89950 "BAASIT Test Perms."
         codeunit "BAASIT Test Runner No Rollback" = X,
         codeunit "BAASIT Test Mode" = X,
         codeunit "BAASIT Test Run Mgt." = X,
-        codeunit "BAASIT Job Queue Hold" = X;
+        codeunit "BAASIT Job Queue Hold" = X,
+        codeunit "BAASIT Post Batch Diag" = X,
+        codeunit "BAASIT Post Batch Diag Run" = X;
 }

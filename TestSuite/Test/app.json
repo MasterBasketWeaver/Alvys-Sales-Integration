@@ -4,7 +4,7 @@
   "description": "Automated tests for the Alvys Sales Integration app.",
   "publisher": "BryanA BC Developments Inc.",
   "logo": "./Logo/BryanALogo.jpg",
-  "version": "27.0.1.0",
+  "version": "27.0.1.1",
   "runtime": "16.0",
   "target": "Cloud",
   "application": "27.0.0.0",
@@ -42,6 +42,12 @@
       "name": "Fleetrock Integration",
       "publisher": "BryanA BC Developments Inc.",
       "version": "27.0.1.6"
+    },
+    {
+      "id": "e7e4551c-46e4-40a0-98aa-d33dc1d10bde",
+      "name": "Multi-Entity Management (NA)",
+      "publisher": "Binary Stream Software Inc.",
+      "version": "1.1.164.0"
     }
   ],
   "idRanges": [
