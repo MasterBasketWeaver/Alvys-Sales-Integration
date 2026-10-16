@@ -21,14 +21,18 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
     // isolation disabled, because the invoice and the deduction have to survive one phase to be
     // asserted against by the next.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
     /// <summary>
     /// Phase one: Fleetrock through to a deduction sitting unpaid in Alvys, with everything the
     /// poll phase needs recorded on the run singleton.
     /// </summary>
+#if not PRODUCTION
     [Test]
+#endif
     procedure RepairOrderReachesAlvysAsADeduction()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -47,8 +51,9 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
         // an unpaid truck deduction that the settlement poll will later be able to find.
         Initialize();
 
-        // [GIVEN] A repair order in Fleetrock for the unit whose number matches an Alvys truck
-        ROId := ROHelper.CreateRepairOrder(UnitVinTok);
+        // [GIVEN] A repair order in Fleetrock for the unit whose number matches an Alvys truck. It is
+        // TEST420 because that truck's deductions can be paid from the Alvys Driver Settlements screen.
+        ROId := ROHelper.CreateRepairOrder(ROHelper.GetUnitVin(UnitNumberTok));
 
         // [GIVEN] The repair order is invoiced in Fleetrock as of yesterday
         ROHelper.SetRepairOrderToInvoiced(ROId);
@@ -116,7 +121,9 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
     /// Phase two: the deduction the seed phase created has been settled in the Alvys web UI, and
     /// the poll has to notice, apply it, and leave the invoice paid.
     /// </summary>
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettledDeductionIsPolledBackAndPaysTheInvoice()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -359,11 +366,11 @@ codeunit 89956 "BAASIT Alvys Poll E2E Tests"
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         FleetrockSetup: Record "FRI Fleetrock Setup";
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         ApiJsonMgt: Codeunit "BAAPI Json Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
         ROHelper: Codeunit "BAASIT Fleetrock RO Helper";
-        UnitVinTok: Label '1234567890', Locked = true;
+        UnitNumberTok: Label 'TEST420', Locked = true;
         LocationTok: Label 'TEST', Locked = true;
 }
