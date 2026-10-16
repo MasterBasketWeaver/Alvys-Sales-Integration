@@ -23,6 +23,9 @@ codeunit 89952 "BAASIT Test Run Mgt."
         TestResult: Record "BAASIT Test Result";
         TestRun: Record "BAASIT Test Run";
         TestMode: Codeunit "BAASIT Test Mode";
+#if PRODUCTION
+        ProductionTestRunner: Codeunit "BAASIT Production Test Runner";
+#endif
         StartedAt: DateTime;
     begin
         TestResult.DeleteAll();
@@ -34,10 +37,14 @@ codeunit 89952 "BAASIT Test Run Mgt."
         // queues commits it.
         JobQueueHold.HoldJobQueues();
 
+#if PRODUCTION
+        ProductionTestRunner.Run(SuiteCodeunits(), not KeepData, false);
+#else
         if KeepData then
             Codeunit.Run(Codeunit::"BAASIT Test Runner No Rollback")
         else
             Codeunit.Run(Codeunit::"BAASIT Alvys Test Runner");
+#endif
         TestMode.SetKeepData(false);
         JobQueueHold.ResumeJobQueues();
 
@@ -61,6 +68,9 @@ codeunit 89952 "BAASIT Test Run Mgt."
         TestResult: Record "BAASIT Test Result";
         TestRun: Record "BAASIT Test Run";
         E2EContext: Codeunit "BAASIT E2E Context";
+#if PRODUCTION
+        ProductionTestRunner: Codeunit "BAASIT Production Test Runner";
+#endif
         StartedAt: DateTime;
     begin
         TestResult.DeleteAll();
@@ -74,7 +84,11 @@ codeunit 89952 "BAASIT Test Run Mgt."
         // poll phase has run.
         JobQueueHold.HoldJobQueues();
 
+#if PRODUCTION
+        ProductionTestRunner.Run(E2ECodeunits(), false, true);
+#else
         Codeunit.Run(Codeunit::"BAASIT E2E Test Runner");
+#endif
         E2EContext.SetPhase(Enum::"BAASIT E2E Phase"::None);
         if Phase in [Phase::Poll, Phase::"Statement Poll"] then
             JobQueueHold.ResumeJobQueues();
@@ -86,5 +100,30 @@ codeunit 89952 "BAASIT Test Run Mgt."
         TestRun.Failed := TestResult.CountByOutcome(TestResult.Outcome::Failure);
         TestRun."Tests Run" := TestRun.Successful + TestRun.Failed;
         TestRun.Modify();
+    end;
+
+    /// <summary>
+    /// The test codeunits of the suite, in the order they run. Every runner reads this list, so no
+    /// test codeunit can be left out of one runner and not another.
+    /// </summary>
+    procedure SuiteCodeunits() CodeunitIds: List of [Integer]
+    begin
+        CodeunitIds.Add(Codeunit::"BAASIT Alvys Sales Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Fleetrock E2E Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Fleetrock TZ Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Alvys Dim Import Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Fleetrock Driver Tests");
+        // The chained end-to-end codeunits are deliberately not here. Their phases have a manual
+        // settlement in the Alvys web UI between them, so they cannot run unattended as part of the
+        // suite; RunE2EPhase runs them a phase at a time instead.
+    end;
+
+    /// <summary>
+    /// The chained end-to-end test codeunits, whose methods RunE2EPhase picks one phase from.
+    /// </summary>
+    procedure E2ECodeunits() CodeunitIds: List of [Integer]
+    begin
+        CodeunitIds.Add(Codeunit::"BAASIT Alvys Poll E2E Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Alvys Stmt E2E Tests");
     end;
 }

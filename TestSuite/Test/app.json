@@ -4,7 +4,7 @@
   "description": "Automated tests for the Alvys Sales Integration app.",
   "publisher": "BryanA BC Developments Inc.",
   "logo": "./Logo/BryanALogo.jpg",
-  "version": "27.0.1.1",
+  "version": "27.0.1.5",
   "runtime": "16.0",
   "target": "Cloud",
   "application": "27.0.0.0",
@@ -30,12 +30,6 @@
       "name": "Rest API functionality",
       "publisher": "BryanA BC Developments Inc.",
       "version": "27.0.1.0"
-    },
-    {
-      "id": "dd0be2ea-f733-4d65-bb34-a28f4624fb14",
-      "name": "Library Assert",
-      "publisher": "Microsoft",
-      "version": "27.0.0.0"
     },
     {
       "id": "9ac25096-0cd1-ab62-adc1-cc823016a988",

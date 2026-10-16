@@ -1,3 +1,4 @@
+#if not PRODUCTION
 codeunit 89954 "BAASIT Test Runner No Rollback"
 {
     // The no-rollback twin of codeunit "BAASIT Alvys Test Runner": TestIsolation is a compile-time
@@ -10,17 +11,12 @@ codeunit 89954 "BAASIT Test Runner No Rollback"
     TestIsolation = Disabled;
 
     trigger OnRun()
+    var
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+        CodeunitId: Integer;
     begin
-        // Keep this list identical to the one in codeunit "BAASIT Alvys Test Runner", so both
-        // runners always cover the same suite.
-        Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock TZ Tests");
-        Codeunit.Run(Codeunit::"BAASIT Alvys Dim Import Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock Driver Tests");
-        // Codeunit "BAASIT Alvys Poll E2E Tests" is deliberately not here. Its two phases have a
-        // manual settlement in the Alvys web UI between them, so it cannot run unattended as part
-        // of the suite; codeunit "BAASIT E2E Test Runner" runs it a phase at a time instead.
+        foreach CodeunitId in TestRunMgt.SuiteCodeunits() do
+            Codeunit.Run(CodeunitId);
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
@@ -36,33 +32,14 @@ codeunit 89954 "BAASIT Test Runner No Rollback"
     trigger OnAfterTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions; Success: Boolean)
     var
         TestResult: Record "BAASIT Test Result";
-        FinishTime: DateTime;
     begin
         if FunctionName = '' then
             exit;
-
-        FinishTime := CurrentDateTime();
-
-        TestResult.Init();
-        TestResult."Codeunit ID" := CodeunitId;
-        TestResult."Codeunit Name" := CopyStr(CodeunitName, 1, MaxStrLen(TestResult."Codeunit Name"));
-        TestResult."Method Name" := CopyStr(FunctionName, 1, MaxStrLen(TestResult."Method Name"));
-        TestResult."Start Time" := this.StartTime;
-        TestResult."Finish Time" := FinishTime;
-        TestResult.Duration := FinishTime - this.StartTime;
-
-        if Success then
-            TestResult.Outcome := TestResult.Outcome::Success
-        else begin
-            TestResult.Outcome := TestResult.Outcome::Failure;
-            TestResult."Error Message" := CopyStr(GetLastErrorText(), 1, MaxStrLen(TestResult."Error Message"));
-            TestResult."Error Call Stack" := CopyStr(GetLastErrorCallStack(), 1, MaxStrLen(TestResult."Error Call Stack"));
-        end;
-
-        TestResult.Insert(true);
+        TestResult.Log(CodeunitId, CodeunitName, FunctionName, this.StartTime, Success);
     end;
 
     var
         // TestMode: Codeunit "BAASIT Test Mode";
         StartTime: DateTime;
 }
+#endif

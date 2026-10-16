@@ -338,7 +338,7 @@ codeunit 89959 "BAASIT Fleetrock RO Helper"
 
     var
         FleetrockSetup: Record "FRI Fleetrock Setup";
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
         RestAPIMgt: Codeunit "FRI REST API Mgt.";

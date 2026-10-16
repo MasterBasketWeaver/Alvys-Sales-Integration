@@ -6,10 +6,14 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
     // M/D/YYYY text, a blank end_date means the assignment is open, and a VIN keeps the rows of
     // its earlier drivers with status Deactivated.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverDatesAreReadAsFleetrockSendsThem()
     var
         DriverObj: JsonObject;
@@ -23,7 +27,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.AreEqual(Today() + 30, JsonMgt.GetJsonValueAsDate(DriverObj, 'end_date'), 'end_date should be read as sent.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverWithNoDatesIsFound()
     begin
         // [SCENARIO] An active driver with no start or end date is on the truck now.
@@ -33,7 +39,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsTrue(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'An active driver with no dates should be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverThatStartedInThePastIsFound()
     begin
         // [SCENARIO] The shape every active driver in the Fleetrock sandbox has: started a while
@@ -44,7 +52,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsTrue(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'An active driver who started in the past should be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverStartingTodayIsFound()
     begin
         // [SCENARIO] A driver whose assignment starts today is on the truck today.
@@ -54,7 +64,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsTrue(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'An active driver starting today should be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverEndingInTheFutureIsFound()
     begin
         // [SCENARIO] A driver whose assignment has not ended yet is still on the truck.
@@ -64,7 +76,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsTrue(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'An active driver whose end date is still ahead should be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverStartingInTheFutureIsNotFound()
     begin
         // [SCENARIO] A driver who has not started yet is not on the truck.
@@ -74,7 +88,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsFalse(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'A driver starting in the future should not be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverWhoseEndDateHasPassedIsNotFound()
     begin
         // [SCENARIO] A driver whose assignment has ended is no longer on the truck.
@@ -84,7 +100,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsFalse(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'A driver whose end date has passed should not be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DeactivatedDriverIsNotFound()
     begin
         // [SCENARIO] A deactivated driver is not active, whatever the dates say.
@@ -94,7 +112,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsFalse(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'A deactivated driver should not be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverOnAnotherVinIsNotFound()
     begin
         // [SCENARIO] Only the driver on the asked-for VIN counts.
@@ -104,7 +124,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.IsFalse(FleetrockMgt.FindDriver(Drivers, VinTok, true, FoundDriver), 'A driver on another VIN should not be found.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ActiveDriverIsFoundAfterTheDeactivatedOneBeforeIt()
     begin
         // [SCENARIO] As on VIN 123123 in the sandbox: the truck's previous driver, deactivated, comes
@@ -117,7 +139,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.AreEqual('Current', JsonMgt.GetJsonValueAsText(FoundDriver, 'first_name'), 'The active driver should be the one returned.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure WithoutActiveOnlyTheFirstDriverOnTheVinIsFound()
     begin
         // [SCENARIO] With ActiveOnly off, status and dates are ignored.
@@ -128,7 +152,9 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
         Assert.AreEqual('Old', JsonMgt.GetJsonValueAsText(FoundDriver, 'first_name'), 'The first driver on the VIN should be returned.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure LiveActiveDriverIsFound()
     begin
         // [SCENARIO] Against the Fleetrock sandbox: VIN 8888 has two active drivers, both started
@@ -166,7 +192,7 @@ codeunit 89968 "BAASIT Fleetrock Driver Tests"
     end;
 
     var
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
         Drivers: JsonArray;

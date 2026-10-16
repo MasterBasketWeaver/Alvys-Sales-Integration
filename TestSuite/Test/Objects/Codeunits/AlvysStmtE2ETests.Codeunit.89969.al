@@ -18,13 +18,17 @@ codeunit 89969 "BAASIT Alvys Stmt E2E Tests"
     // Nothing rolls back: the chain runs through codeunit "BAASIT E2E Test Runner" with isolation
     // off, because what the seed phase creates has to survive into the poll phase.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
     /// <summary>
     /// Phase one: a repair order per case, posted, and its deduction sitting unpaid in Alvys.
     /// </summary>
+#if not PRODUCTION
     [Test]
+#endif
     procedure RepairOrdersReachAlvysForEachStatementCase()
     var
         E2ERun: Record "BAASIT E2E Run";
@@ -54,7 +58,9 @@ codeunit 89969 "BAASIT Alvys Stmt E2E Tests"
     /// it, and the poll has to carry each statement's date through to the payment, the invoice and
     /// the repair order.
     /// </summary>
+#if not PRODUCTION
     [Test]
+#endif
     procedure EachPartPostsOnItsStatementDateInBCAndFleetrock()
     var
         StmtCase: Record "BAASIT E2E Stmt Case";
@@ -272,7 +278,7 @@ codeunit 89969 "BAASIT Alvys Stmt E2E Tests"
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         FleetrockSetup: Record "FRI Fleetrock Setup";
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         ApiJsonMgt: Codeunit "BAAPI Json Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";

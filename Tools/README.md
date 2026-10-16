@@ -9,7 +9,8 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | Script | Purpose |
 | --- | --- |
 | `bc-publish.sh [project-path]` | Compile with `alc` and publish to the sandbox dev endpoint. Defaults to the App project. |
-| `bc-publish-pte.py <project-path>` | Compile with `alc` and install as a per-tenant extension through the automation API's `extensionUpload`, uninstalling and unpublishing a dev copy of the same app first. Needs a version never uploaded before: BC refuses an app id + version it has already received, even after it was unpublished. |
+| `bc-publish-pte.py <project-path> [--force-sync] [--define SYMBOLS]` | Compile with `alc` (with `--define`, those preprocessor symbols) and install as a per-tenant extension through the automation API's `extensionUpload`, uninstalling and unpublishing a dev copy of the same app first. Needs a version never uploaded before: BC refuses an app id + version it has already received, even after it was unpublished. |
+| `bc-publish-tests-production.py [--force-sync]` | Build the test app with the `PRODUCTION` preprocessor symbol and install it as a PTE in `BC_ENV` (default `Production`). Regenerates codeunit "BAASIT Test Dispatch" from the `[Test]` procedures first; see *Testing in production* below. |
 | `bc-symbols.py [project-path]` | Download `.app` symbols into the project's `.alpackages`. Defaults to the App project. |
 | `bc_auth.py` | OAuth device-code flow with a persistent token cache. `get_access_token()` is imported by the two scripts above. |
 | `project_paths.py` | Resolves `TOOLS`, `REPO` and `PROJECT_ROOT`. Use it for anything kept out of git. |
@@ -47,3 +48,28 @@ slow, needs a rendered session, and reports results only as a screenshot. Likewi
 reintroduce the old Playwright drivers for the AL Test Tool (page 130401).
 
 Nothing external seeds, adjusts or inspects the data before or after a run.
+
+## Testing in production
+
+Business Central runs `Subtype = Test` and `TestRunner` codeunits only in sandboxes; in a production
+environment the run fails with *Test Automation is not enabled on this system*, and Microsoft's test
+framework (Library Assert and the rest) is not meant to be installed there. The test app therefore has
+one source and two builds, chosen with the `PRODUCTION` preprocessor symbol (`alc /define:PRODUCTION`,
+which `bc-publish-tests-production.py` passes):
+
+- The test codeunits wrap `Subtype = Test`, `TestPermissions` and each `[Test]` attribute in
+  `#if not PRODUCTION`, so in production they are ordinary codeunits with the same test bodies.
+- Assertions go through codeunit "BAASIT Assert" in both builds, and expected errors are checked with
+  `[TryFunction]` wrappers rather than `asserterror`, so neither build depends on the test framework.
+- The three test runners exist only in the sandbox build. In production, `TestRunMgt` runs the same
+  codeunit lists through "BAASIT Production Test Runner", which runs each method in its own
+  `Codeunit.Run` and logs it to the same result table, so `bc-run-tests.py` works unchanged
+  (`BC_ENV=Production`).
+- A passing method is rolled back by ending in an error, which is finer than the sandbox's
+  per-codeunit isolation, but anything a test commits stays in the company. `--keep-data` skips the
+  rollback as it does in the sandbox.
+
+Add a test as usual, with the `#if not PRODUCTION` / `[Test]` / `#endif` lines around its attribute;
+the dispatch codeunit is regenerated on the next production publish. Give each production upload its
+own version: BC refuses a different file under an app id + version it has already received.
+

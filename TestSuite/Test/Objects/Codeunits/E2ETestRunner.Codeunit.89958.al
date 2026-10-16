@@ -1,3 +1,4 @@
+#if not PRODUCTION
 codeunit 89958 "BAASIT E2E Test Runner"
 {
     // Runs one phase of the chained end-to-end suite. Isolation is off because the chain has to
@@ -8,9 +9,12 @@ codeunit 89958 "BAASIT E2E Test Runner"
     TestIsolation = Disabled;
 
     trigger OnRun()
+    var
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+        CodeunitId: Integer;
     begin
-        Codeunit.Run(Codeunit::"BAASIT Alvys Poll E2E Tests");
-        Codeunit.Run(Codeunit::"BAASIT Alvys Stmt E2E Tests");
+        foreach CodeunitId in TestRunMgt.E2ECodeunits() do
+            Codeunit.Run(CodeunitId);
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
@@ -24,33 +28,14 @@ codeunit 89958 "BAASIT E2E Test Runner"
     trigger OnAfterTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions; Success: Boolean)
     var
         TestResult: Record "BAASIT Test Result";
-        FinishTime: DateTime;
     begin
         if FunctionName = '' then
             exit;
-
-        FinishTime := CurrentDateTime();
-
-        TestResult.Init();
-        TestResult."Codeunit ID" := CodeunitId;
-        TestResult."Codeunit Name" := CopyStr(CodeunitName, 1, MaxStrLen(TestResult."Codeunit Name"));
-        TestResult."Method Name" := CopyStr(FunctionName, 1, MaxStrLen(TestResult."Method Name"));
-        TestResult."Start Time" := this.StartTime;
-        TestResult."Finish Time" := FinishTime;
-        TestResult.Duration := FinishTime - this.StartTime;
-
-        if Success then
-            TestResult.Outcome := TestResult.Outcome::Success
-        else begin
-            TestResult.Outcome := TestResult.Outcome::Failure;
-            TestResult."Error Message" := CopyStr(GetLastErrorText(), 1, MaxStrLen(TestResult."Error Message"));
-            TestResult."Error Call Stack" := CopyStr(GetLastErrorCallStack(), 1, MaxStrLen(TestResult."Error Call Stack"));
-        end;
-
-        TestResult.Insert(true);
+        TestResult.Log(CodeunitId, CodeunitName, FunctionName, this.StartTime, Success);
     end;
 
     var
         E2EContext: Codeunit "BAASIT E2E Context";
         StartTime: DateTime;
 }
+#endif

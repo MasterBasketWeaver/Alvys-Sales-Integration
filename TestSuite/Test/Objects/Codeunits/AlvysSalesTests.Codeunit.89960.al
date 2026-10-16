@@ -6,10 +6,14 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     // Initialize(). Business Central data is rolled back when the test run ends, but deductions
     // created here stay in the Alvys tenant, so they are all written against the "Test" category.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetBearerTokenReturnsAccessToken()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -28,7 +32,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(AlvysSetup."Access Token Expiry Date" > CurrentDateTime(), 'The stored token should not be expired.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CheckToGetAccessTokenReusesCachedToken()
     var
         FirstToken, SecondToken : Text;
@@ -46,7 +52,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.AreEqual(FirstToken, SecondToken, 'The cached token should be reused while it is still valid.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetTruckIDReturnsTruckForTruckNumber()
     var
         TruckID: Text;
@@ -62,20 +70,24 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.AreEqual('TR2516627931370728085', TruckID, 'GetTruckID should resolve truck number 1 to its Alvys Id.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetTruckIDWithBlankTruckNumberFails()
     begin
         // [SCENARIO] A truck cannot be looked up without a truck number.
         Initialize();
 
         // [WHEN] The truck is looked up with a blank number
-        asserterror AlvysSalesMgt.GetTruckID('');
+        Assert.IsFalse(TryGetTruckID(''), 'A blank truck number should be refused.');
 
         // [THEN] The call is rejected before it reaches Alvys
         Assert.ExpectedError('The truck number cannot be blank.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CreateDeductionForTruckCreatesDeduction()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -100,7 +112,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(DeductionID);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CreateDeductionForDriverCreatesDeduction()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -124,7 +138,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(DeductionID);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CreateDeductionForTruckFromPostedInvoiceLinksBothDocuments()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -163,7 +179,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(DeductionID);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails()
     var
         SalesHeader: Record "Sales Header";
@@ -179,27 +197,31 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         SalesInvHeader."Dimension Set ID" := 0;
 
         // [WHEN] A deduction is created for the posted invoice
-        asserterror AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), -4.5, 'Test', 'BC test app - no tractor code', false);
+        Assert.IsFalse(TryCreateDeductionForInvoice(SalesHeader, SalesInvHeader, -4.5, 'BC test app - no tractor code'), 'An invoice without a tractor code should be refused.');
 
         // [THEN] The call is rejected before it reaches Alvys: without dimensions there is no
         // tractor code, so the truck number resolves to blank
         Assert.ExpectedError('The truck number cannot be blank.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CreateDeductionWithBlankAssetIDFails()
     begin
         // [SCENARIO] A deduction cannot be created without a truck or driver Id.
         Initialize();
 
         // [WHEN] A deduction is created with a blank truck Id
-        asserterror AlvysSalesMgt.CreateDeductionForTruck('', '1', WorkDate(), -1.25, 'Test', 'BC test app - blank truck');
+        Assert.IsFalse(TryCreateDeductionForTruck('', '1', -1.25, 'BC test app - blank truck'), 'A blank truck Id should be refused.');
 
         // [THEN] The call is rejected before it reaches Alvys
         Assert.ExpectedError('The TruckId cannot be blank when creating a deduction.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure MapDocumentTypeMapsOrdersAndInvoices()
     var
         SalesHeader: Record "Sales Header";
@@ -220,7 +242,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
             'A sales invoice should map to the Sales Invoice entry document type.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure MapDocumentTypeRejectsUnsupportedDocumentTypes()
     var
         SalesHeader: Record "Sales Header";
@@ -231,19 +255,21 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Initialize();
 
         // [WHEN] A quote is mapped
-        asserterror AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::Quote);
+        Assert.IsFalse(TryMapDocumentType(SalesHeader."Document Type"::Quote), 'A quote should not map.');
 
         // [THEN] The mapping is rejected
         Assert.ExpectedError('Sales documents of type Quote are not supported. Only orders and invoices can be sent to Alvys.');
 
         // [WHEN] A credit memo is mapped
-        asserterror AlvysSalesMgt.MapDocumentType(SalesHeader."Document Type"::"Credit Memo");
+        Assert.IsFalse(TryMapDocumentType(SalesHeader."Document Type"::"Credit Memo"), 'A credit memo should not map.');
 
         // [THEN] The mapping is rejected
         Assert.ExpectedError('Sales documents of type Credit Memo are not supported. Only orders and invoices can be sent to Alvys.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetDeductionReturnsCreatedDeduction()
     var
         AmountObj, ResponseObj : JsonObject;
@@ -270,14 +296,16 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(DeductionID);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetDeductionWithBlankIDFails()
     begin
         // [SCENARIO] A deduction cannot be read back without an Id.
         Initialize();
 
         // [WHEN] A deduction is read back with a blank Id
-        asserterror AlvysSalesMgt.GetDeduction('');
+        Assert.IsFalse(TryGetDeduction(''), 'A blank deduction Id should be refused.');
 
         // [THEN] The call is rejected before it reaches Alvys
         Assert.ExpectedError('The deduction Id cannot be blank.');
@@ -622,7 +650,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         // Assert.AreEqual(FirstEntry."Entry No." + 1, SecondEntry."Entry No.", 'The second inbound entry should take the next entry number.');
     // end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure OutboundCallsAreLoggedAsOutbound()
     var
         AlvysEntry: Record "BAASI Alvys Sales Entry";
@@ -668,7 +698,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         // Assert.IsFalse(AlvysEntry.IsEmpty(), 'The inbound entry should be readable through the page filter.');
     // end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SearchDeductionsFindsADeductionJustCreated()
     var
         ResponseObj: JsonObject;
@@ -691,7 +723,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(DeductionID);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SearchDeductionsOnlyReturnsPaidWhenAskedTo()
     var
         ResponseObj: JsonObject;
@@ -713,17 +747,21 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(PaidTotal >= UnpaidTotal, 'Including paid deductions should not return fewer deductions than excluding them.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SearchDeductionsWithNoStartDateFails()
     begin
         // [SCENARIO] A search with no range to ask over is refused rather than sent.
         Initialize();
 
-        asserterror AlvysSalesMgt.SearchDeductions(0D, 0D, true, 0, 100);
+        Assert.IsFalse(TrySearchDeductions(0D, 0D), 'A search with no start date should be refused.');
         Assert.ExpectedError('A deduction search needs a date to start from.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure PolledSettlementPostsThePaymentAgainstTheInvoice()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -772,7 +810,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementPostedIsRolledBackWhenBatchPostingFails()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -815,7 +855,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettledDeductionIsAppliedAndMarked()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -843,7 +885,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure PolledSettlementIsLoggedAsPolledNotAsAWebCall()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -868,7 +912,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure AppliedSettlementIsNotAppliedTwice()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -894,7 +940,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementThatCannotBeAppliedStaysForTheNextRun()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -930,9 +978,19 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.IsFalse(AlvysDeduction."Settlement Applied", 'A settlement that failed should be left for the next run to try again.');
 
         CleanUpDeduction(AlvysDeduction.Id);
+
+        // The commits above put the deduction beyond the rollback the production build runs each
+        // test under, and the poll would then raise on it in every later run. Any that an earlier,
+        // interrupted run left behind go with it.
+        AlvysDeduction.Reset();
+        AlvysDeduction.SetRange("Posted Document No.", 'NOSUCHINVOICE');
+        AlvysDeduction.DeleteAll(true);
+        Commit();
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementOnClosedInvoiceIsRefused()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -963,7 +1021,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementLargerThanRemainingAmountIsRefused()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -996,7 +1056,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure NewDeductionHasItsWholeAmountRemaining()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1015,7 +1077,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure PollReadsASettlementFromTheDeductionItself()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1043,7 +1107,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitDeductionIsLoggedAsADeductionPerPart()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1087,7 +1153,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitPartsAreLoggedOnceHoweverOftenThePollRuns()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1120,7 +1188,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure APartSplitAgainIsLoggedUnderThatPart()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1160,7 +1230,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure EachSettledPartIsPostedAsItsOwnPayment()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1236,7 +1308,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitDeductionIsNotAppliedAlongsideItsParts()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1274,7 +1348,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitOfASplitPartIsSettledAndRollsUpBothLevels()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1368,7 +1444,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ASplitLogsOnlyThePartsInItsOwnGroup()
     var
         SplitDeduction, OtherDeduction : Record "BAASI Alvys Deduction";
@@ -1413,7 +1491,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(OtherDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure APartSplitAgainDoesNotLogItsSiblingASecondTime()
     var
         AlvysDeduction, SplitPart : Record "BAASI Alvys Deduction";
@@ -1459,7 +1539,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ADeductionSplitIntoManyPartsLogsEveryPartOnce()
     var
         AlvysDeduction, SplitPart : Record "BAASI Alvys Deduction";
@@ -1526,7 +1608,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitsOnSeveralDeductionsArePolledWithoutCrossingOver()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1580,7 +1664,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         end;
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitsPolledOneAtATimeLeaveTheEarlierSplitsAlone()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1645,7 +1731,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         end;
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure FourSplitsDeepStillSettleTheDeductionOnce()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1727,7 +1815,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitOfASplitPaysTheInvoiceALinePerSettledPart()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1826,7 +1916,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure FourSplitsDeepPayTheInvoiceALinePerLeaf()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1919,7 +2011,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitOfASplitPostsEachPartAsItIsAppliedWhenAutoPosting()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -1994,7 +2088,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure FourSplitsDeepPostEachLeafAsItIsAppliedWhenAutoPosting()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2074,7 +2170,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettledDeductionIsLinkedToTheStatementThatPaidIt()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2102,7 +2200,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure StatementLineIsNotMatchedAcrossOwnerOperatorsOrAmounts()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2130,7 +2230,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DeductionNoStatementListsPostsOnTheWorkDate()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2163,7 +2265,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementOnAFutureStatementDatePostsWithoutAWarning()
     begin
         // [SCENARIO] A statement is dated at the end of its pay period, which can be after the day
@@ -2173,7 +2277,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         PostOnStatementDate(OpenPostedInvoiceNo(), WorkDate() + 9, WorkDate() + 9);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SettlementOnAStatementDatedBeforeTheInvoicePostsOnTheInvoiceDate()
     var
         SalesInvHeader: Record "Sales Invoice Header";
@@ -2186,7 +2292,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         PostOnStatementDate(SalesInvHeader."No.", SalesInvHeader."Posting Date" - 30, SalesInvHeader."Posting Date");
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure SplitPartsAreLinkedToTheStatementsThatPaidThem()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2279,7 +2387,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         CleanUpDeduction(AlvysDeduction.Id);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverStatementSearchReturnsFinalizedStatements()
     var
         ResponseObj, StatementObj : JsonObject;
@@ -2303,7 +2413,9 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         Assert.IsTrue(Evaluate(StatementDate, JsonMgt.GetJsonValueAsText(StatementObj, 'StatementDate'), 9), 'A statement date should read as a date.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure LiveSplitAndMultiSplitPartsFindTheirStatements()
     var
         Deductions: Record "BAASI Alvys Deduction";
@@ -3079,6 +3191,44 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// A keep-data run skips the clean-up along with the rollback, so the deduction survives for
     /// inspection alongside the Business Central documents.
     /// </summary>
+    // Try functions stand in for asserterror, which is a test-codeunit statement: they let the tests
+    // check an error the same way in the production build, where these are ordinary codeunits.
+    [TryFunction]
+    local procedure TryGetTruckID(TruckNumber: Text)
+    begin
+        AlvysSalesMgt.GetTruckID(TruckNumber);
+    end;
+
+    [TryFunction]
+    local procedure TryCreateDeductionForInvoice(var SalesHeader: Record "Sales Header"; var SalesInvHeader: Record "Sales Invoice Header"; Amount: Decimal; Description: Text)
+    begin
+        AlvysSalesMgt.CreateDeductionForTruck(SalesHeader, SalesInvHeader, WorkDate(), Amount, 'Test', Description, false);
+    end;
+
+    [TryFunction]
+    local procedure TryCreateDeductionForTruck(TruckID: Text; TruckNumber: Text[50]; Amount: Decimal; Description: Text)
+    begin
+        AlvysSalesMgt.CreateDeductionForTruck(TruckID, TruckNumber, WorkDate(), Amount, 'Test', Description);
+    end;
+
+    [TryFunction]
+    local procedure TryMapDocumentType(DocType: Enum "Sales Document Type")
+    begin
+        AlvysSalesMgt.MapDocumentType(DocType);
+    end;
+
+    [TryFunction]
+    local procedure TryGetDeduction(DeductionID: Text)
+    begin
+        AlvysSalesMgt.GetDeduction(DeductionID);
+    end;
+
+    [TryFunction]
+    local procedure TrySearchDeductions(StartDate: Date; EndDate: Date)
+    begin
+        AlvysSalesMgt.SearchDeductions(StartDate, EndDate, true, 0, 100);
+    end;
+
     local procedure AssertMissingInvoiceError(PostedInvoiceNo: Code[20])
     begin
         Assert.ExpectedError(StrSubstNo('Posted sales invoice %1', PostedInvoiceNo));
@@ -3291,7 +3441,7 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     end;
 
     var
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         AlvysSettlementPoll: Codeunit "BAASI Alvys Settlement Poll";
         JsonMgt: Codeunit "BAAPI Json Mgt.";

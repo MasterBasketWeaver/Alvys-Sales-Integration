@@ -28,8 +28,14 @@ permissionset 89950 "BAASIT Test Perms."
         codeunit "BAASIT Alvys Dim Import Tests" = X,
         codeunit "BAASIT Fail Settl Batch Commit" = X,
         codeunit "BAASIT RO Post Location" = X,
+#if PRODUCTION
+        codeunit "BAASIT Production Test Runner" = X,
+        codeunit "BAASIT Test Dispatch" = X,
+#else
         codeunit "BAASIT Alvys Test Runner" = X,
         codeunit "BAASIT Test Runner No Rollback" = X,
+#endif
+        codeunit "BAASIT Assert" = X,
         codeunit "BAASIT Test Mode" = X,
         codeunit "BAASIT Test Run Mgt." = X,
         codeunit "BAASIT Job Queue Hold" = X,

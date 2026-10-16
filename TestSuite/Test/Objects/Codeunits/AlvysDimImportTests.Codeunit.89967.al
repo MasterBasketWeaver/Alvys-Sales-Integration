@@ -7,10 +7,14 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
     // tests named for Alvys call the live Alvys and Fleetrock APIs, the second one importing into
     // the company's own truck and driver dimensions; the runner's test isolation rolls that back.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksCreatesValuePerTruckNumber()
     var
         DimValue: Record "Dimension Value";
@@ -32,7 +36,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(DimValue.Get(TruckDimTok, 'BT-102'), 'Every truck should be imported.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksNamesTruckAfterFleetrockDriver()
     var
         DimValue: Record "Dimension Value";
@@ -55,7 +61,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('Pat Lee', DimValue.Name, 'The truck should be named after its Fleetrock driver.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksNamesTruckAfterActiveFleetrockDriverOnly()
     var
         DimValue: Record "Dimension Value";
@@ -86,7 +94,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('Keep Me', DimValue.Name, 'A truck whose only Fleetrock driver is deactivated should keep its name.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksRenamesTruckWhenFleetrockDriverChanges()
     var
         DimValue: Record "Dimension Value";
@@ -109,7 +119,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('New Driver', DimValue.Name, 'The truck should be renamed after its current Fleetrock driver.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksKeepsNameWhenFleetrockHasNoDriver()
     var
         DimValue: Record "Dimension Value";
@@ -138,7 +150,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual(LastModified, DimValue.SystemModifiedAt, 'A truck with nothing to change should not be modified.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksBlocksInactiveTruck()
     var
         DimValue: Record "Dimension Value";
@@ -161,7 +175,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Get(TruckDimTok, 'BT-502'), 'An inactive truck should not be created.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksDoesNotBlockTruckInShop()
     var
         DimValue: Record "Dimension Value";
@@ -184,7 +200,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Blocked, 'A truck in repair should not be blocked.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksDoesNotUnblockTruck()
     var
         DimValue: Record "Dimension Value";
@@ -205,7 +223,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(DimValue.Blocked, 'The import should never unblock a dimension value.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportTrucksSkipsTruckNumberTooLongForCode()
     var
         DimValue: Record "Dimension Value";
@@ -227,7 +247,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.RecordIsEmpty(DimValue);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportDriversCreatesValueCodedByName()
     var
         DimValue: Record "Dimension Value";
@@ -249,7 +271,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Blocked, 'An active driver should not be blocked.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportDriversKeepsExistingName()
     var
         DimValue: Record "Dimension Value";
@@ -270,7 +294,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('7130', DimValue.Name, 'An existing driver''s name should be kept.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportDriversFillsBlankName()
     var
         DimValue: Record "Dimension Value";
@@ -291,7 +317,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('Robin Test', DimValue.Name, 'A blank name should be filled from Alvys.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportDriversBlocksInactiveDriver()
     var
         DimValue: Record "Dimension Value";
@@ -314,7 +342,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Get(DriverDimTok, 'NEVER HERE'), 'An inactive driver should not be created.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportDriversCutsLongNameToCode()
     var
         DimValue: Record "Dimension Value";
@@ -334,7 +364,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('Maximiliano Longname-Garcia', DimValue.Name, 'The full name should be kept.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverDimensionCannotBeTruckDimension()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -349,13 +381,15 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         AlvysSetup.Get();
 
         // [WHEN] The driver dimension is set to the truck dimension
-        asserterror AlvysSetup.Validate("Driver Code Dimension", TruckDimTok);
+        Assert.IsFalse(TryValidateDriverDimension(AlvysSetup, TruckDimTok), 'The truck dimension should be refused as the driver dimension.');
 
         // [THEN] It is refused
         Assert.ExpectedError('cannot be the same dimension');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure TruckDimensionCannotBeDriverDimension()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -370,13 +404,15 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         FleetrockSetup.Get();
 
         // [WHEN] The truck dimension is set to the driver dimension
-        asserterror FleetrockSetup.Validate("Truck Dimension Code", DriverDimTok);
+        Assert.IsFalse(TryValidateTruckDimension(FleetrockSetup, DriverDimTok), 'The driver dimension should be refused as the truck dimension.');
 
         // [THEN] It is refused
         Assert.ExpectedError('cannot be the same dimension');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverAndTruckDimensionsCanBothBeBlank()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -400,7 +436,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('', FleetrockSetup."Truck Dimension Code", 'A blank truck dimension should be accepted.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportNeedsADimension()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -416,13 +454,15 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         AlvysSetup.Modify();
 
         // [WHEN] The import runs
-        asserterror DimensionImport.ImportTrucksAndDrivers();
+        Assert.IsFalse(TryImportTrucksAndDrivers(), 'The import should refuse to run with no dimension.');
 
         // [THEN] It says why
         Assert.ExpectedError('nothing to import');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure GetTrucksAndDriversReturnEveryRecord()
     var
         Trucks, Drivers : JsonArray;
@@ -453,7 +493,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(FoundInactiveDriver, StrSubstNo('Inactive driver %1 should be returned by GET drivers.', LiveInactiveDriverTok));
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure JobQueueImportsTrucksAndDriversFromAlvys()
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
@@ -500,7 +542,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(DimValue.IsEmpty(), 'An inactive driver should not be on an unblocked dimension value.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportLinksNewValueToAlvysID()
     var
         DimValue: Record "Dimension Value";
@@ -522,7 +566,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('DR900', DimValue."BAASI Alvys ID", 'A new driver should carry its Alvys ID.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure ImportLinksExistingValueByCode()
     var
         DimValue: Record "Dimension Value";
@@ -543,7 +589,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual(1, CountValues(DriverDimTok), 'No second value should be made for the driver.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure RenamedDriverKeepsItsValue()
     var
         DimValue: Record "Dimension Value";
@@ -562,7 +610,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Get(DriverDimTok, 'ROBIN MARRIED'), 'No value should be made under the new name.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure RenumberedTruckKeepsItsValue()
     var
         DimValue: Record "Dimension Value";
@@ -583,7 +633,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsFalse(DimValue.Get(TruckDimTok, 'BT-903-NEW'), 'No value should be made under the new number.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure LongTruckNumberIsStillMatchedByAlvysID()
     var
         DimValue: Record "Dimension Value";
@@ -603,7 +655,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(DimValue.Blocked, 'The linked truck should be found by Alvys ID and blocked.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure DriverWhoseCodeIsTakenIsSkipped()
     var
         DimValue: Record "Dimension Value";
@@ -625,7 +679,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.IsTrue(DimValue.Get(DriverDimTok, 'SOMEONE ELSE'), 'The run should carry on past the skipped driver.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure AlvysIDOnAnotherDimensionDoesNotStopNewValue()
     var
         DimValue: Record "Dimension Value";
@@ -647,7 +703,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('DUP908', DimValue."BAASI Alvys ID", 'The truck value should keep its Alvys ID.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure AlvysIDOnAnotherDimensionDoesNotStopLinkByCode()
     var
         DimValue: Record "Dimension Value";
@@ -667,7 +725,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual('DUP912', DimValue."BAASI Alvys ID", 'The existing truck value should be linked though a driver has the same ID.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure RecordWithoutAlvysIDIsSkipped()
     var
         Trucks, Drivers, FleetrockUnits, FleetrockDrivers : JsonArray;
@@ -686,7 +746,9 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         Assert.AreEqual(0, CountValues(DriverDimTok), 'A driver without an Alvys ID should not be imported.');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure AlvysIDCannotBeOnTwoValues()
     var
         DimValue: Record "Dimension Value";
@@ -699,13 +761,15 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         DimValue.Get(DriverDimTok, 'SECOND');
 
         // [WHEN] The same ID is put on a second value
-        asserterror DimValue.Validate("BAASI Alvys ID", 'DR910');
+        Assert.IsFalse(TryValidateAlvysID(DimValue, 'DR910'), 'An Alvys ID already on another value should be refused.');
 
         // [THEN] It is refused
         Assert.ExpectedError('is already on dimension value');
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure AlvysIDCanBeOnValuesInDifferentDimensions()
     var
         DimValue: Record "Dimension Value";
@@ -723,6 +787,32 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         // [THEN] Both carry it
         DimValue.SetRange("BAASI Alvys ID", 'DUP911');
         Assert.AreEqual(2, DimValue.Count(), 'The same Alvys ID should be allowed in two dimensions.');
+    end;
+
+    // Try functions stand in for asserterror, which is a test-codeunit statement: they let the tests
+    // check an error the same way in the production build, where these are ordinary codeunits.
+    [TryFunction]
+    local procedure TryValidateDriverDimension(var AlvysSetup: Record "BAASI Alvys Sales Setup"; DimensionCode: Code[20])
+    begin
+        AlvysSetup.Validate("Driver Code Dimension", DimensionCode);
+    end;
+
+    [TryFunction]
+    local procedure TryValidateTruckDimension(var FleetrockSetup: Record "FRI Fleetrock Setup"; DimensionCode: Code[20])
+    begin
+        FleetrockSetup.Validate("Truck Dimension Code", DimensionCode);
+    end;
+
+    [TryFunction]
+    local procedure TryImportTrucksAndDrivers()
+    begin
+        DimensionImport.ImportTrucksAndDrivers();
+    end;
+
+    [TryFunction]
+    local procedure TryValidateAlvysID(var DimValue: Record "Dimension Value"; AlvysID: Code[50])
+    begin
+        DimValue.Validate("BAASI Alvys ID", AlvysID);
     end;
 
     local procedure Initialize()
@@ -865,7 +955,7 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
     end;
 
     var
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         DimensionImport: Codeunit "BAASI Alvys Driver/Truck Imp.";
         JsonMgt: Codeunit "BAAPI Json Mgt.";

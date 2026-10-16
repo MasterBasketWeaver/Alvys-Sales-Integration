@@ -6,11 +6,15 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
     // while GetRO returns them in UTC. The round-trip tests rely on both Fleetrock test accounts
     // having their profile Time Zone set to Eastern Standard Time.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
     Permissions = tabledata "Sales Invoice Header" = RIMD;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure CustomerTimeZoneConvertsCustomerUpdateDates()
     var
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
@@ -25,7 +29,9 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
         RestoreTimeZones();
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure VendorTimeZoneConvertsVendorUpdateDates()
     var
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
@@ -40,7 +46,9 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
         RestoreTimeZones();
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure BlankTimeZonesSendUtc()
     var
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
@@ -55,7 +63,9 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
         RestoreTimeZones();
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure PaidDateIsStoredInFleetrockAsThePaymentTime()
     var
         ImportEntry: Record "FRI Import/Export Entry";
@@ -94,7 +104,9 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
             ROHelper.DeleteRepairOrder(ROId);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure VendorUpdateDateIsStoredInFleetrockAsTheSentTime()
     var
         FleetrockMgt: Codeunit "FRI Fleetrock Mgt.";
@@ -191,7 +203,7 @@ codeunit 89965 "BAASIT Fleetrock TZ Tests"
 
     var
         FleetrockSetup: Record "FRI Fleetrock Setup";
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         JsonMgt: Codeunit "FRI Json Mgt.";
         ROHelper: Codeunit "BAASIT Fleetrock RO Helper";
         TestMode: Codeunit "BAASIT Test Mode";

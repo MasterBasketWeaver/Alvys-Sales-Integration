@@ -1,3 +1,4 @@
+#if not PRODUCTION
 codeunit 89951 "BAASIT Alvys Test Runner"
 {
     // Runs the Alvys test codeunits and logs the outcome of every test method to the
@@ -6,24 +7,20 @@ codeunit 89951 "BAASIT Alvys Test Runner"
     //
     // Implementing OnAfterTestRun also suppresses the platform's own results message, which is
     // what lets the calling page report the run itself.
+    //
+    // Production has no test automation, so the PRODUCTION build leaves the test runners out and
+    // runs the same codeunits through "BAASIT Production Test Runner" instead.
 
     Subtype = TestRunner;
     TestIsolation = Codeunit;
 
     trigger OnRun()
+    var
+        TestRunMgt: Codeunit "BAASIT Test Run Mgt.";
+        CodeunitId: Integer;
     begin
-        // Every test codeunit must be listed here explicitly, so no test can be silently left out
-        // of a run: Alvys API tests in "BAASIT Alvys Sales Tests", the Fleetrock-to-Alvys
-        // round trip in "BAASIT Fleetrock E2E Tests". Keep this list identical to the one in
-        // codeunit "BAASIT Test Runner No Rollback", so both runners always cover the same suite.
-        Codeunit.Run(Codeunit::"BAASIT Alvys Sales Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock E2E Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock TZ Tests");
-        Codeunit.Run(Codeunit::"BAASIT Alvys Dim Import Tests");
-        Codeunit.Run(Codeunit::"BAASIT Fleetrock Driver Tests");
-        // Codeunit "BAASIT Alvys Poll E2E Tests" is deliberately not here. Its two phases have a
-        // manual settlement in the Alvys web UI between them, so it cannot run unattended as part
-        // of the suite; codeunit "BAASIT E2E Test Runner" runs it a phase at a time instead.
+        foreach CodeunitId in TestRunMgt.SuiteCodeunits() do
+            Codeunit.Run(CodeunitId);
     end;
 
     trigger OnBeforeTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions): Boolean
@@ -39,35 +36,16 @@ codeunit 89951 "BAASIT Alvys Test Runner"
     trigger OnAfterTestRun(CodeunitId: Integer; CodeunitName: Text; FunctionName: Text; Permissions: TestPermissions; Success: Boolean)
     var
         TestResult: Record "BAASIT Test Result";
-        FinishTime: DateTime;
     begin
         // A blank method name is the callback for the test codeunit as a whole; the individual
         // methods have already been logged by then, so there is nothing to add.
         if FunctionName = '' then
             exit;
-
-        FinishTime := CurrentDateTime();
-
-        TestResult.Init();
-        TestResult."Codeunit ID" := CodeunitId;
-        TestResult."Codeunit Name" := CopyStr(CodeunitName, 1, MaxStrLen(TestResult."Codeunit Name"));
-        TestResult."Method Name" := CopyStr(FunctionName, 1, MaxStrLen(TestResult."Method Name"));
-        TestResult."Start Time" := this.StartTime;
-        TestResult."Finish Time" := FinishTime;
-        TestResult.Duration := FinishTime - this.StartTime;
-
-        if Success then
-            TestResult.Outcome := TestResult.Outcome::Success
-        else begin
-            TestResult.Outcome := TestResult.Outcome::Failure;
-            TestResult."Error Message" := CopyStr(GetLastErrorText(), 1, MaxStrLen(TestResult."Error Message"));
-            TestResult."Error Call Stack" := CopyStr(GetLastErrorCallStack(), 1, MaxStrLen(TestResult."Error Call Stack"));
-        end;
-
-        TestResult.Insert(true);
+        TestResult.Log(CodeunitId, CodeunitName, FunctionName, this.StartTime, Success);
     end;
 
     var
         // TestMode: Codeunit "BAASIT Test Mode";
         StartTime: DateTime;
 }
+#endif

@@ -11,17 +11,23 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
     // the no-rollback runner (codeunit "BAASIT Test Runner No Rollback"), the external clean-up
     // is skipped too, so the documents can be inspected in all three systems afterwards.
 
+#if not PRODUCTION
     Subtype = Test;
     TestPermissions = Disabled;
+#endif
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure InvoicedRepairOrderIsImportedPostedAndDeducted()
     begin
         // [SCENARIO] With auto-posting off, the import leaves the invoice for someone to post.
         ImportPostAndSettleRepairOrder(false);
     end;
 
+#if not PRODUCTION
     [Test]
+#endif
     procedure InvoicedRepairOrderIsAutoPostedOnImportAndDeducted()
     begin
         // [SCENARIO] With auto-posting on, the import posts the invoice itself, and posting it that
@@ -337,7 +343,7 @@ codeunit 89953 "BAASIT Fleetrock E2E Tests"
     var
         AlvysSetup: Record "BAASI Alvys Sales Setup";
         FleetrockSetup: Record "FRI Fleetrock Setup";
-        Assert: Codeunit "Library Assert";
+        Assert: Codeunit "BAASIT Assert";
         AlvysSalesMgt: Codeunit "BAASI Alvys Sales Mgt.";
         JsonMgt: Codeunit "FRI Json Mgt.";
         ROHelper: Codeunit "BAASIT Fleetrock RO Helper";
