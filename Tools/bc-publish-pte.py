@@ -2,13 +2,15 @@
 """Compile an AL project and install it as a per-tenant extension (PTE).
 
 Usage: bc-publish-pte.py <project-path>
-       bc-publish-pte.py --app <file.app>
+       bc-publish-pte.py --app <file.app> [--keep-dir <project>/output]
        Add --force-sync to allow destructive schema changes (removed fields), which drops their data.
        Add --define SYMBOLS (comma-separated) to compile with those preprocessor symbols defined.
 
 --app uploads an already-built .app as it is, without compiling. BC refuses a different file under an
 app id + version it has received before, so re-installing a version elsewhere (another environment)
-has to use the exact file that was uploaded the first time.
+has to use the exact file that was uploaded the first time. Every uploaded build is kept read-only
+in the project's output/ (see bc_keep_build.py); a compile whose result differs from a kept build of
+the same version stops before uploading.
 
 The dev endpoint (bc-publish.sh) cannot replace a PTE, so this goes through the automation API's
 extensionUpload instead and waits for the deployment to finish. A PTE upload is refused unless its
@@ -24,12 +26,14 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 
 import requests
 
 from bc_auth import get_access_token
+from bc_keep_build import keep_build
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
@@ -63,6 +67,11 @@ if "--define" in sys.argv:
     i = sys.argv.index("--define")
     defines = sys.argv[i + 1]
     del sys.argv[i:i + 2]
+keep_dir = None
+if "--keep-dir" in sys.argv:
+    i = sys.argv.index("--keep-dir")
+    keep_dir = sys.argv[i + 1]
+    del sys.argv[i:i + 2]
 
 if len(sys.argv) > 2 and sys.argv[1] == "--app":
     app_file = os.path.abspath(sys.argv[2])
@@ -71,15 +80,20 @@ if len(sys.argv) > 2 and sys.argv[1] == "--app":
 else:
     project = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "App")
     manifest = json.load(open(os.path.join(project, "app.json")))
-    app_file = os.path.join(project, "output", f"{manifest['publisher']}_{manifest['name']}_{manifest['version']}.app")
-    print(f"[1/4] Compiling {manifest['name']} {manifest['version']}{f' with {defines}' if defines else ''}...")
-    os.makedirs(os.path.dirname(app_file), exist_ok=True)
-    if os.path.isfile(app_file):
-        os.remove(app_file)
-    subprocess.run([ALC, f"/project:{project}", f"/packagecachepath:{os.path.join(project, '.alpackages')}", f"/out:{app_file}"]
-                   + ([f"/define:{defines}"] if defines else []), check=False)
-    if not os.path.isfile(app_file):
-        die("compilation failed; no .app produced")
+    name = f"{manifest['publisher']}_{manifest['name']}_{manifest['version']}.app"
+    # A build with defines (the PRODUCTION test build) has the same name and version as the plain one.
+    keep_dir = keep_dir or os.path.join(project, "output", *([defines.replace(",", "_").lower()] if defines else []))
+    if os.path.isfile(os.path.join(keep_dir, name)):
+        app_file = os.path.join(keep_dir, name)
+        print(f"[1/4] Using the kept build of {manifest['version']} (no compile); raise the version to upload new code")
+    else:
+        app_file = os.path.join(tempfile.mkdtemp(), name)
+        print(f"[1/4] Compiling {manifest['name']} {manifest['version']}{f' with {defines}' if defines else ''}...")
+        subprocess.run([ALC, f"/project:{project}", f"/packagecachepath:{os.path.join(project, '.alpackages')}", f"/out:{app_file}"]
+                       + ([f"/define:{defines}"] if defines else []), check=False)
+        if not os.path.isfile(app_file):
+            die("compilation failed; no .app produced")
+app_file = keep_build(app_file, keep_dir)
 version = tuple(int(p) for p in manifest["version"].split("."))
 print(f"  {manifest['name']} {manifest['version']} -> {ENV} / {COMPANY}")
 
