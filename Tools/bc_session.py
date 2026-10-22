@@ -3,9 +3,10 @@
 
 The signed-in session lives in the Chromium profile at .bcprofile. No 2FA is required
 for this account, so expiry is handled automatically: any script calling open_page()
-re-authenticates from BC_credentials.txt without user interaction.
+re-authenticates from `cred` (alvys-bc-user, alvys-bc-password) without user interaction.
 """
 import os
+import subprocess
 import time
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
@@ -16,7 +17,6 @@ from project_paths import PROJECT_ROOT, TOOLS
 
 BASE = PROJECT_ROOT
 PROFILE = os.path.join(BASE, ".bcprofile")
-CREDS = os.path.join(BASE, "BC_credentials.txt")
 
 
 def log(*a):
@@ -27,10 +27,13 @@ def page_url(page_id):
     return f"https://businesscentral.dynamics.com/{TENANT}/{ENV}?page={page_id}"
 
 
+def cred_get(name):
+    """A secret from `cred` (~/.local/bin/cred, systemd-creds for this user)."""
+    return subprocess.run(["cred", "get", name], capture_output=True, text=True, check=True).stdout.rstrip("\n")
+
+
 def read_creds():
-    with open(CREDS) as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
-    return lines[0], lines[1]
+    return cred_get("alvys-bc-user"), cred_get("alvys-bc-password")
 
 
 def _at_login(page):

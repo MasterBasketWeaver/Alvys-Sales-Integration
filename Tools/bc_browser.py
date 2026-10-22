@@ -6,7 +6,7 @@ is reused across sessions -- after one successful interactive sign-in, `shot` ru
 headless with no further auth.
 
 Usage:
-  bc_browser.py login          headed; auto-fills credentials from BC_credentials.txt,
+  bc_browser.py login          headed; auto-fills the sign-in from `cred` (alvys-bc-user/-password),
                                pauses for 2FA if Microsoft asks for it
   bc_browser.py shot [pageid]  headless; screenshots a BC page using the saved session
 """
@@ -21,7 +21,6 @@ from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT  # above the repo: kept out of git
 PROFILE = os.path.join(BASE, ".bcprofile")
-CREDS = os.path.join(BASE, "BC_credentials.txt")
 SHOT = os.path.join(BASE, "bc_shot.png")
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "shot"
@@ -34,9 +33,8 @@ def log(*a):
 
 
 def read_creds():
-    with open(CREDS) as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
-    return lines[0], lines[1]
+    from bc_session import read_creds as from_cred_store
+    return from_cred_store()
 
 
 # Text fragments that mean "Microsoft wants a second factor from a human"

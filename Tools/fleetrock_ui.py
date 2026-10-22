@@ -7,7 +7,7 @@ at zero, and there is no task or part level endpoint. The UI is the only way to 
 rate, so a taxed repair order for the import tests has to be created through the browser.
 
 The session lives in the .frprofile persistent Chromium profile in the project root, signed in
-from the customer account in Fleetrock_credentials.txt.
+from the test customer account in `cred` (fleetrock-test-customer-user/-password).
 """
 import os
 import re
@@ -16,7 +16,6 @@ from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT
 PROFILE = os.path.join(BASE, ".frprofile")
-CREDS = os.path.join(BASE, "Fleetrock_credentials.txt")
 ROOT_URL = "https://test.fleetrock.com"
 
 
@@ -25,10 +24,9 @@ def log(*a):
 
 
 def read_customer_creds():
-    """The customer account's web username and password, the first two values in the file."""
-    with open(CREDS) as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
-    return lines[1], lines[2]
+    """The test customer account's web username and password."""
+    from bc_session import cred_get
+    return cred_get("fleetrock-test-customer-user"), cred_get("fleetrock-test-customer-password")
 
 
 def open_context(pw, headless=True):

@@ -40,7 +40,6 @@ import requests
 import alvys_api
 import alvys_ui
 from bc_auth import get_access_token
-from project_paths import PROJECT_ROOT
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
@@ -182,9 +181,8 @@ def statements_by_line(tok, owner_operator_id):
 
 
 def fleetrock_paid_date(ro_id):
-    with open(f"{PROJECT_ROOT}/Fleetrock_credentials.txt") as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
-    username, api_key = lines[1], lines[4]
+    from bc_session import cred_get
+    username, api_key = cred_get("fleetrock-test-customer-user"), cred_get("fleetrock-test-customer-api-key")
     url = f"{FLEETROCK}/GetRO?username={urllib.parse.quote(username)}&token={api_key}&id={ro_id}"
     body = json.load(urllib.request.urlopen(url, timeout=120))
     ro = body.get("repair_orders", [body])[0]
