@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Minimal Alvys public API client.
 
-Reads the read-write client from alvys_apikey2.txt in the project root. auth0 rejects Python's
+Reads the read-write client (alvys-api-rw-client-id/-secret) from `cred`; read_write=False uses the
+read-only alvys-api-ro-* client. auth0 rejects Python's
 default user agent, so requests go out as curl.
 """
 import base64
 import json
-import os
 import time
 import urllib.error
 import urllib.request
 
-from project_paths import PROJECT_ROOT
-
-BASE = PROJECT_ROOT
 API = "https://integrations.alvys.com/api/p/v1/"
 TOKEN_URL = "https://auth.alvys.com/oauth/token"
 AUDIENCE = "https://api.alvys.com/public/"
@@ -21,9 +18,9 @@ UA = "curl/8.5.0"
 
 
 def credentials(read_write=True):
-    path = os.path.join(BASE, "alvys_apikey2.txt" if read_write else "alvys_apikey1.txt")
-    values = [l.strip() for l in open(path) if l.strip() and not l.lower().startswith("client")]
-    return values[0], values[1]
+    from bc_session import cred_get
+    prefix = "alvys-api-rw" if read_write else "alvys-api-ro"
+    return cred_get(prefix + "-client-id"), cred_get(prefix + "-client-secret")
 
 
 def token(read_write=True):

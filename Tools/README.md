@@ -17,7 +17,7 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | `alvys-e2e.py [manual\|jobqueue\|both\|resume\|reset] [--auto-post off\|on\|both]` | Drives the chained Fleetrock -> BC -> Alvys -> poll test, settling the deduction in the Alvys UI between phases. With no arguments it runs two chains: Manual poll with Fleetrock auto-post off, and Job Queue poll with it on. |
 | `alvys-e2e-statements.py [7777\|TEST420]` | Statement-date chain: three repair orders on the truck, paid in the Alvys UI whole, split once and split twice over three pay periods, then checks each part's payment date in BC and the invoice/Fleetrock paid dates. Uses up three pay periods on the truck per run. |
 | `alvys_api.py` | Alvys public API client (token, deduction reads, `wait_until_paid`). |
-| `alvys_ui.py` | Playwright helpers for the Alvys web UI: `settle_truck_deductions` settles a truck's whole Open tab, `settle_rows` only the rows named, and `split_deduction` splits a row in two. An expired session signs itself back in from `alvys_credentials`. |
+| `alvys_ui.py` | Playwright helpers for the Alvys web UI: `settle_truck_deductions` settles a truck's whole Open tab, `settle_rows` only the rows named, and `split_deduction` splits a row in two. An expired session signs itself back in from `cred` (`alvys-web-user`, `alvys-web-password`). |
 | `alvys-login.py [code]` | Signs the `.alvysprofile` profile in with an authenticator code, ticking "Remember this device for 30 days". Only needed when that 30 days lapses and Alvys asks for a code again. |
 | `bc_session.py` | Shared Playwright helpers for the BC web client; re-authenticates automatically when the saved session expires. |
 | `bc_browser.py`, `bc_click.py`, `bc_probe.py`, `bc_action_msg.py`, `bc_action_details.py`, `bc_err_probe.py`, `bc_err_copy.py` | Ad-hoc helpers for driving and inspecting BC pages while debugging. |
@@ -26,13 +26,15 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 ## Paths
 
 Scripts live in the repo, but the things they read that must **not** be version controlled —
-the `.bcprofile` and `.alvysprofile` browser profiles, the Alvys API keys, the MSAL token
-cache, and any screenshots they write — live in the project root *above* the
+the `.bcprofile` and `.alvysprofile` browser profiles, the MSAL token cache, and any
+screenshots they write — live in the project root *above* the
 repository. Import `PROJECT_ROOT` from `project_paths.py` for those rather than deriving a
 path from `__file__`; `REPO` in the same module is where the AL projects are.
 
-BC and Fleetrock passwords and API keys are in `cred` (`~/.local/bin/cred`), read through
-`bc_session.cred_get`: `alvys-bc-user` / `alvys-bc-password` for the BC web sign-in, and
+BC, Alvys and Fleetrock passwords and API keys are in `cred` (`~/.local/bin/cred`), read through
+`bc_session.cred_get`: `alvys-web-user` / `alvys-web-password` for app.alvys.com,
+`alvys-api-rw-client-id` / `-secret` (read-write) and `alvys-api-ro-*` (read-only) for the Alvys
+API, `alvys-bc-user` / `alvys-bc-password` for the BC web sign-in, and
 `fleetrock-test-customer-*` / `fleetrock-test-vendor-*` (`-user`, `-password`, `-api-key`) for
 test.fleetrock.com. `fleetrock-customer-*`, `fleetrock-vendor-*` and `fleetrock-admin-*` are the
 www.fleetrock.com accounts.

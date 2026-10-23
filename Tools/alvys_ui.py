@@ -7,7 +7,7 @@ This drives the Driver Settlements module to do that: approve the deduction into
 and generate the statement, which is what turns IsPaid over.
 
 The session lives in the .alvysprofile persistent Chromium profile in the project root. An expired
-session is signed back in from alvys_credentials without asking anything, as long as the profile
+session is signed back in from `cred` (alvys-web-user, alvys-web-password) without asking anything, as long as the profile
 still remembers this device for MFA ("Remember this device for 30 days"). When that lapses Alvys
 asks for an authenticator code, which only the user has; alvys-login.py takes it.
 """
@@ -20,7 +20,6 @@ from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT
 PROFILE = os.path.join(BASE, ".alvysprofile")
-CREDS = os.path.join(BASE, "alvys_credentials")
 SETTLEMENTS_URL = "https://app.alvys.com/accounting/driver-settlements"
 OTP_URL_PART = "mfa-otp-challenge"
 
@@ -55,8 +54,8 @@ def sign_in(page, code=None):
     """Sign in on the Auth0 page the app redirected to: username, then password, then the
     authenticator code if Alvys asks for one. Without a code, a code prompt is an error naming
     alvys-login.py, since only the user can supply it."""
-    with open(CREDS) as f:
-        user, pwd = [ln.strip() for ln in f if ln.strip()][:2]
+    from bc_session import cred_get
+    user, pwd = cred_get("alvys-web-user"), cred_get("alvys-web-password")
     field = _visible(page, ["input[name=username]"])
     if field:
         field.fill(user)
