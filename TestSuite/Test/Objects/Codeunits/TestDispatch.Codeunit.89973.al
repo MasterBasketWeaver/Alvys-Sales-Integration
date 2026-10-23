@@ -126,6 +126,27 @@ codeunit 89973 "BAASIT Test Dispatch"
                     Methods.Add('InvoicedRepairOrderIsImportedPostedAndDeducted');
                     Methods.Add('InvoicedRepairOrderIsAutoPostedOnImportAndDeducted');
                 end;
+            Codeunit::"BAASIT Fleetrock Match Tests":
+                begin
+                    Methods.Add('CustomerIsFoundByExactSourceNo');
+                    Methods.Add('CustomerIsFoundBySourceNoInAnotherCase');
+                    Methods.Add('CustomerIsFoundByNameIgnoringCaseAndGetsSourceNo');
+                    Methods.Add('CustomerFoundByNameWithCompanyIdGetsTheCompanyId');
+                    Methods.Add('CustomerFoundByNameKeepsItsOtherSourceNo');
+                    Methods.Add('CustomerWithFilterCharactersIsFoundByName');
+                    Methods.Add('CustomerNameWithTrailingSpacesOrTooLongIsFound');
+                    Methods.Add('UnblockedCustomerIsPreferredThenLowestNo');
+                    Methods.Add('SourceNoMatchWinsOverNameMatch');
+                    Methods.Add('RepairOrderCustomerNameFindsUppercaseCustomer');
+                    Methods.Add('CustomerIsNotFoundWithoutAMatch');
+                    Methods.Add('VendorIsFoundByExactSourceNo');
+                    Methods.Add('VendorIsFoundBySourceNoInAnotherCase');
+                    Methods.Add('VendorIsFoundByNameIgnoringCaseAndGetsSourceNo');
+                    Methods.Add('VendorWithFilterCharactersIsFoundByName');
+                    Methods.Add('UnblockedVendorIsPreferredThenLowestNo');
+                    Methods.Add('VendorIsNotFoundWithoutAMatch');
+                    Methods.Add('PurchaseOrderImportUsesVendorFoundByName');
+                end;
             Codeunit::"BAASIT Fleetrock TZ Tests":
                 begin
                     Methods.Add('CustomerTimeZoneConvertsCustomerUpdateDates');
@@ -152,6 +173,8 @@ codeunit 89973 "BAASIT Test Dispatch"
                 exit(RunFleetrockDriverTests(MethodName));
             Codeunit::"BAASIT Fleetrock E2E Tests":
                 exit(RunFleetrockE2ETests(MethodName));
+            Codeunit::"BAASIT Fleetrock Match Tests":
+                exit(RunFleetrockMatchTests(MethodName));
             Codeunit::"BAASIT Fleetrock TZ Tests":
                 exit(RunFleetrockTimeZoneTests(MethodName));
         end;
@@ -418,6 +441,53 @@ codeunit 89973 "BAASIT Test Dispatch"
                 Tests.InvoicedRepairOrderIsImportedPostedAndDeducted();
             'InvoicedRepairOrderIsAutoPostedOnImportAndDeducted':
                 Tests.InvoicedRepairOrderIsAutoPostedOnImportAndDeducted();
+            else
+                exit(false);
+        end;
+        exit(true);
+    end;
+
+    local procedure RunFleetrockMatchTests(MethodName: Text): Boolean
+    var
+        Tests: Codeunit "BAASIT Fleetrock Match Tests";
+    begin
+        case MethodName of
+            'CustomerIsFoundByExactSourceNo':
+                Tests.CustomerIsFoundByExactSourceNo();
+            'CustomerIsFoundBySourceNoInAnotherCase':
+                Tests.CustomerIsFoundBySourceNoInAnotherCase();
+            'CustomerIsFoundByNameIgnoringCaseAndGetsSourceNo':
+                Tests.CustomerIsFoundByNameIgnoringCaseAndGetsSourceNo();
+            'CustomerFoundByNameWithCompanyIdGetsTheCompanyId':
+                Tests.CustomerFoundByNameWithCompanyIdGetsTheCompanyId();
+            'CustomerFoundByNameKeepsItsOtherSourceNo':
+                Tests.CustomerFoundByNameKeepsItsOtherSourceNo();
+            'CustomerWithFilterCharactersIsFoundByName':
+                Tests.CustomerWithFilterCharactersIsFoundByName();
+            'CustomerNameWithTrailingSpacesOrTooLongIsFound':
+                Tests.CustomerNameWithTrailingSpacesOrTooLongIsFound();
+            'UnblockedCustomerIsPreferredThenLowestNo':
+                Tests.UnblockedCustomerIsPreferredThenLowestNo();
+            'SourceNoMatchWinsOverNameMatch':
+                Tests.SourceNoMatchWinsOverNameMatch();
+            'RepairOrderCustomerNameFindsUppercaseCustomer':
+                Tests.RepairOrderCustomerNameFindsUppercaseCustomer();
+            'CustomerIsNotFoundWithoutAMatch':
+                Tests.CustomerIsNotFoundWithoutAMatch();
+            'VendorIsFoundByExactSourceNo':
+                Tests.VendorIsFoundByExactSourceNo();
+            'VendorIsFoundBySourceNoInAnotherCase':
+                Tests.VendorIsFoundBySourceNoInAnotherCase();
+            'VendorIsFoundByNameIgnoringCaseAndGetsSourceNo':
+                Tests.VendorIsFoundByNameIgnoringCaseAndGetsSourceNo();
+            'VendorWithFilterCharactersIsFoundByName':
+                Tests.VendorWithFilterCharactersIsFoundByName();
+            'UnblockedVendorIsPreferredThenLowestNo':
+                Tests.UnblockedVendorIsPreferredThenLowestNo();
+            'VendorIsNotFoundWithoutAMatch':
+                Tests.VendorIsNotFoundWithoutAMatch();
+            'PurchaseOrderImportUsesVendorFoundByName':
+                Tests.PurchaseOrderImportUsesVendorFoundByName();
             else
                 exit(false);
         end;

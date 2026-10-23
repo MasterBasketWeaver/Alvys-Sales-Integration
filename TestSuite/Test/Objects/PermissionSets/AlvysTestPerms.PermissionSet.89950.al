@@ -26,6 +26,7 @@ permissionset 89950 "BAASIT Test Perms."
         codeunit "BAASIT Fleetrock E2E Tests" = X,
         codeunit "BAASIT Fleetrock TZ Tests" = X,
         codeunit "BAASIT Alvys Dim Import Tests" = X,
+        codeunit "BAASIT Fleetrock Match Tests" = X,
         codeunit "BAASIT Fail Settl Batch Commit" = X,
         codeunit "BAASIT RO Post Location" = X,
 #if PRODUCTION

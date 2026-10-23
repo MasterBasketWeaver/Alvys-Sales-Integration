@@ -113,6 +113,7 @@ codeunit 89952 "BAASIT Test Run Mgt."
         CodeunitIds.Add(Codeunit::"BAASIT Fleetrock TZ Tests");
         CodeunitIds.Add(Codeunit::"BAASIT Alvys Dim Import Tests");
         CodeunitIds.Add(Codeunit::"BAASIT Fleetrock Driver Tests");
+        CodeunitIds.Add(Codeunit::"BAASIT Fleetrock Match Tests");
         // The chained end-to-end codeunits are deliberately not here. Their phases have a manual
         // settlement in the Alvys web UI between them, so they cannot run unattended as part of the
         // suite; RunE2EPhase runs them a phase at a time instead.
