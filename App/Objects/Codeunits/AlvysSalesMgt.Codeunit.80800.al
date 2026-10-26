@@ -66,6 +66,11 @@ codeunit 80800 "BAASI Alvys Sales Mgt."
             Error(TokenMissingErr, ResponseText);
         ExpiresIn := JsonMgt.GetJsonValueAsInteger(ResponseObj, 'expires_in');
         ExpiryDuration := ExpiresIn * 1000;
+        // Re-read under lock: every Alvys job queue entry refreshes the token, so another session may
+        // have saved the setup since this copy was read, and modifying the stale copy then fails with
+        // "Sorry, we just updated this page". The lock is taken only now to keep it off the request.
+        AlvysSalesSetup.LockTable();
+        AlvysSalesSetup.Get();
         AlvysSalesSetup.SetAccessToken(AccessToken);
         AlvysSalesSetup.Validate("Access Token Expiry Date", SendTime + ExpiryDuration);
         AlvysSalesSetup.Modify(true);
