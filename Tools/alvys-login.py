@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Sign the .alvysprofile browser profile in to Alvys when it no longer remembers this device.
+"""Sign the ALVYS_ENV browser profile in to Alvys when it no longer remembers this device.
 
-Usage: alvys-login.py [code]
+Usage: [ALVYS_ENV=prod] alvys-login.py [code]
 
 Pass the current code from the authenticator app; without one it is asked for once the password
 step is done, so it is entered fresh. "Remember this device for 30 days" is ticked, so the

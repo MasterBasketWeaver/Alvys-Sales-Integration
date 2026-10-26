@@ -16,9 +16,11 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | `project_paths.py` | Resolves `TOOLS`, `REPO` and `PROJECT_ROOT`. Use it for anything kept out of git. |
 | `alvys-e2e.py [manual\|jobqueue\|both\|resume\|reset] [--auto-post off\|on\|both]` | Drives the chained Fleetrock -> BC -> Alvys -> poll test, settling the deduction in the Alvys UI between phases. With no arguments it runs two chains: Manual poll with Fleetrock auto-post off, and Job Queue poll with it on. |
 | `alvys-e2e-statements.py [7777\|TEST420]` | Statement-date chain: three repair orders on the truck, paid in the Alvys UI whole, split once and split twice over three pay periods, then checks each part's payment date in BC and the invoice/Fleetrock paid dates. Uses up three pay periods on the truck per run. |
-| `alvys_api.py` | Alvys public API client (token, deduction reads, `wait_until_paid`). |
-| `alvys_ui.py` | Playwright helpers for the Alvys web UI: `settle_truck_deductions` settles a truck's whole Open tab, `settle_rows` only the rows named, and `split_deduction` splits a row in two. An expired session signs itself back in from `cred` (`alvys-web-user`, `alvys-web-password`). |
-| `alvys-login.py [code]` | Signs the `.alvysprofile` profile in with an authenticator code, ticking "Remember this device for 30 days". Only needed when that 30 days lapses and Alvys asks for a code again. |
+| `alvys.py [--env test\|prod] [--ro] envs\|whoami\|get\|call\|ui` | Alvys from the command line against either organization: `whoami` shows the key's org and scopes, `get <path>` and `call <METHOD> <path> [json\|@file]` hit the public API, `ui [path]` opens app.alvys.com in that environment's profile and prints the page (screenshot in `tmp/`). In prod, writes need `--allow-prod-write`. |
+| `alvys_env.py` | The Alvys environments: `test` (org TTG - Test, tt777) and `prod` (org Texas Transportation Group, ta597), each with its own keys and browser profile. `ALVYS_ENV` picks one (default `test`) and every Alvys tool follows it; the e2e scripts refuse `prod`, and API writes to `prod` need `ALVYS_ALLOW_PROD_WRITE=1`. |
+| `alvys_api.py` | Alvys public API client (token, deduction reads, `wait_until_paid`) for the `ALVYS_ENV` organization; a token for any other org is refused. |
+| `alvys_ui.py` | Playwright helpers for the Alvys web UI: `settle_truck_deductions` settles a truck's whole Open tab, `settle_rows` only the rows named, and `split_deduction` splits a row in two. An expired session signs itself back in from `cred` (`alvys-web-user`, `alvys-web-password`) and picks the `ALVYS_ENV` organization at Auth0's organization picker, since the login belongs to both. |
+| `alvys-login.py [code]` | Signs the `ALVYS_ENV` profile (`.alvysprofile`, or `.alvysprofile-prod` for prod) in with an authenticator code, ticking "Remember this device for 30 days". Only needed when that 30 days lapses and Alvys asks for a code again. |
 | `bc_session.py` | Shared Playwright helpers for the BC web client; re-authenticates automatically when the saved session expires. |
 | `bc_browser.py`, `bc_click.py`, `bc_probe.py`, `bc_action_msg.py`, `bc_action_details.py`, `bc_err_probe.py`, `bc_err_copy.py` | Ad-hoc helpers for driving and inspecting BC pages while debugging. |
 | `.upload_server.py` | Small HTTP upload server, writing into the project root. |
@@ -33,8 +35,9 @@ path from `__file__`; `REPO` in the same module is where the AL projects are.
 
 BC, Alvys and Fleetrock passwords and API keys are in `cred` (`~/.local/bin/cred`), read through
 `bc_session.cred_get`: `alvys-web-user` / `alvys-web-password` for app.alvys.com,
-`alvys-api-rw-client-id` / `-secret` (read-write) and `alvys-api-ro-*` (read-only) for the Alvys
-API, `alvys-bc-user` / `alvys-bc-password` for the BC web sign-in, and
+`alvys-api-rw-client-id` / `-secret` (read-write) and `alvys-api-ro-*` (read-only) for the test
+Alvys org's API, `alvys-prod-argo-client-id` / `-secret` (the "Argo Analytics AI" key) for the
+production org's, `alvys-bc-user` / `alvys-bc-password` for the BC web sign-in, and
 `fleetrock-test-customer-*` / `fleetrock-test-vendor-*` (`-user`, `-password`, `-api-key`) for
 test.fleetrock.com. `fleetrock-customer-*`, `fleetrock-vendor-*` and `fleetrock-admin-*` are the
 www.fleetrock.com accounts.

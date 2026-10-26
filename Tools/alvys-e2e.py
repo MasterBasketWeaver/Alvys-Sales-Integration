@@ -35,6 +35,7 @@ import sys
 import requests
 
 import alvys_api
+import alvys_env
 from alvys_ui import settle_truck_deductions
 from bc_auth import get_access_token
 
@@ -241,4 +242,5 @@ def main():
 
 
 if __name__ == "__main__":
+    alvys_env.require_test(__file__.rsplit("/", 1)[-1])
     main()

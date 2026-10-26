@@ -6,22 +6,23 @@ and the token carries no deduction:update scope -- so settling one has to go thr
 This drives the Driver Settlements module to do that: approve the deduction into a draft statement
 and generate the statement, which is what turns IsPaid over.
 
-The session lives in the .alvysprofile persistent Chromium profile in the project root. An expired
+The session lives in the ALVYS_ENV environment's persistent Chromium profile in the project root
+(.alvysprofile for test, .alvysprofile-prod for production; see alvys_env.py). An expired
 session is signed back in from `cred` (alvys-web-user, alvys-web-password) without asking anything, as long as the profile
 still remembers this device for MFA ("Remember this device for 30 days"). When that lapses Alvys
 asks for an authenticator code, which only the user has; alvys-login.py takes it.
 """
-import os
 import re
 
 from playwright.sync_api import sync_playwright
 
+import alvys_env
 from project_paths import PROJECT_ROOT
 
 BASE = PROJECT_ROOT
-PROFILE = os.path.join(BASE, ".alvysprofile")
 SETTLEMENTS_URL = "https://app.alvys.com/accounting/driver-settlements"
 OTP_URL_PART = "mfa-otp-challenge"
+ORG_PICKER_URL_PART = "organization-picker"
 
 
 def log(*a):
@@ -30,7 +31,7 @@ def log(*a):
 
 def open_context(pw, headless=True):
     ctx = pw.chromium.launch_persistent_context(
-        PROFILE, headless=headless, viewport={"width": 1900, "height": 1200},
+        alvys_env.current().profile, headless=headless, viewport={"width": 1900, "height": 1200},
         args=["--disable-blink-features=AutomationControlled"],
     )
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -50,12 +51,21 @@ def _visible(page, selectors):
     return None
 
 
+def pick_organization(page):
+    if ORG_PICKER_URL_PART not in page.url:
+        return
+    org = alvys_env.current().organization
+    page.get_by_role("button", name=org, exact=True).click()
+    page.wait_for_timeout(10000)
+
+
 def sign_in(page, code=None):
     """Sign in on the Auth0 page the app redirected to: username, then password, then the
-    authenticator code if Alvys asks for one. Without a code, a code prompt is an error naming
-    alvys-login.py, since only the user can supply it."""
+    authenticator code if Alvys asks for one, then the ALVYS_ENV organization. Without a code, a
+    code prompt is an error naming alvys-login.py, since only the user can supply it."""
     from bc_session import cred_get
     user, pwd = cred_get("alvys-web-user"), cred_get("alvys-web-password")
+    pick_organization(page)
     field = _visible(page, ["input[name=username]"])
     if field:
         field.fill(user)
@@ -79,6 +89,7 @@ def sign_in(page, code=None):
     for _ in range(40):
         if not at_login(page):
             break
+        pick_organization(page)
         page.wait_for_timeout(1000)
     if at_login(page):
         raise RuntimeError(f"Alvys sign-in did not complete; still at {page.url.split('?')[0]}")

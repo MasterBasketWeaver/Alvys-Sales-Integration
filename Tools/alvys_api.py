@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Minimal Alvys public API client.
 
-Reads the read-write client (alvys-api-rw-client-id/-secret) from `cred`; read_write=False uses the
-read-only alvys-api-ro-* client. auth0 rejects Python's
+The organization comes from ALVYS_ENV (see alvys_env.py): its read-write client from `cred`, or
+with read_write=False its read-only one. auth0 rejects Python's
 default user agent, so requests go out as curl.
 """
 import base64
@@ -10,6 +10,8 @@ import json
 import time
 import urllib.error
 import urllib.request
+
+import alvys_env
 
 API = "https://integrations.alvys.com/api/p/v1/"
 TOKEN_URL = "https://auth.alvys.com/oauth/token"
@@ -19,7 +21,8 @@ UA = "curl/8.5.0"
 
 def credentials(read_write=True):
     from bc_session import cred_get
-    prefix = "alvys-api-rw" if read_write else "alvys-api-ro"
+    env = alvys_env.current()
+    prefix = env.rw_cred if read_write else env.ro_cred
     return cred_get(prefix + "-client-id"), cred_get(prefix + "-client-secret")
 
 
@@ -29,10 +32,16 @@ def token(read_write=True):
                        "audience": AUDIENCE, "grant_type": "client_credentials"}).encode()
     req = urllib.request.Request(TOKEN_URL, data=body,
                                  headers={"Content-Type": "application/json", "User-Agent": UA})
-    return json.load(urllib.request.urlopen(req))["access_token"]
+    tok = json.load(urllib.request.urlopen(req))["access_token"]
+    env = alvys_env.current()
+    org = claims(tok).get("org_name")
+    if org != env.org_name:
+        raise RuntimeError(f"the {env.name} key's token is for Alvys org {org!r}, expected {env.org_name!r}")
+    return tok
 
 
 def call(method, path, tok, payload=None):
+    alvys_env.check_write(method, path)
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(API + path, data=data, method=method,
                                  headers={"Authorization": "Bearer " + tok,
@@ -73,7 +82,11 @@ def wait_until_paid(deduction_id, timeout_s=3000, interval_s=30, log=print):
     return False
 
 
-def scopes(tok):
+def claims(tok):
     payload = tok.split(".")[1]
     payload += "=" * (-len(payload) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload)).get("scope", "")
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def scopes(tok):
+    return claims(tok).get("scope", "")
