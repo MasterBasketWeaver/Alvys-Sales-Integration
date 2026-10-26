@@ -28,16 +28,19 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 ## Paths
 
 Scripts live in the repo, but the things they read that must **not** be version controlled —
-the `.bcprofile` and `.alvysprofile` browser profiles, the MSAL token cache, and any
+the `.bcprofile`, `.alvysprofile` and `.alvysprofile-prod` browser profiles and any
 screenshots they write — live in the project root *above* the
 repository. Import `PROJECT_ROOT` from `project_paths.py` for those rather than deriving a
-path from `__file__`; `REPO` in the same module is where the AL projects are.
+path from `__file__`; `REPO` in the same module is where the AL projects are. The MSAL token
+cache is the Tanager tooling's, `~/work/clients/tanager/bc_token_cache.bin` (`BC_TOKEN_CACHE`
+overrides it).
 
 BC, Alvys and Fleetrock passwords and API keys are in `cred` (`~/.local/bin/cred`), read through
 `bc_session.cred_get`: `alvys-web-user` / `alvys-web-password` for app.alvys.com,
 `alvys-api-rw-client-id` / `-secret` (read-write) and `alvys-api-ro-*` (read-only) for the test
 Alvys org's API, `alvys-prod-argo-client-id` / `-secret` (the "Argo Analytics AI" key) for the
-production org's, `alvys-bc-user` / `alvys-bc-password` for the BC web sign-in, and
+production org's, `tanager-bc-user` / `tanager-bc-password` (bcadmin@dd-transport.com, shared with
+the Tanager tooling in `~/work/clients/tanager`) for the BC web sign-in, and
 `fleetrock-test-customer-*` / `fleetrock-test-vendor-*` (`-user`, `-password`, `-api-key`) for
 test.fleetrock.com. `fleetrock-customer-*`, `fleetrock-vendor-*` and `fleetrock-admin-*` are the
 www.fleetrock.com accounts.

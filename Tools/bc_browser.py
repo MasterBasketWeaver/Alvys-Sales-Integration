@@ -6,7 +6,7 @@ is reused across sessions -- after one successful interactive sign-in, `shot` ru
 headless with no further auth.
 
 Usage:
-  bc_browser.py login          headed; auto-fills the sign-in from `cred` (alvys-bc-user/-password),
+  bc_browser.py login          headed; auto-fills the sign-in from `cred` (tanager-bc-user/-password),
                                pauses for 2FA if Microsoft asks for it
   bc_browser.py shot [pageid]  headless; screenshots a BC page using the saved session
 """

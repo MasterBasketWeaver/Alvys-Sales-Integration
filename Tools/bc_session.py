@@ -3,7 +3,8 @@
 
 The signed-in session lives in the Chromium profile at .bcprofile. No 2FA is required
 for this account, so expiry is handled automatically: any script calling open_page()
-re-authenticates from `cred` (alvys-bc-user, alvys-bc-password) without user interaction.
+re-authenticates from `cred` (tanager-bc-user, tanager-bc-password: bcadmin@dd-transport.com,
+the BC login the Tanager tooling in ~/work/clients/tanager uses) without user interaction.
 """
 import os
 import subprocess
@@ -33,41 +34,53 @@ def cred_get(name):
 
 
 def read_creds():
-    return cred_get("alvys-bc-user"), cred_get("alvys-bc-password")
+    return cred_get("tanager-bc-user"), cred_get("tanager-bc-password")
 
 
 def _at_login(page):
     return "login.microsoftonline.com" in page.url or "login.live.com" in page.url
 
 
+def _visible(page, selector):
+    loc = page.locator(selector)
+    for i in range(loc.count()):
+        if loc.nth(i).is_visible():
+            return loc.nth(i)
+    return None
+
+
 def do_login(page):
-    """Run the username/password flow. This account has no 2FA."""
+    """Run the username/password flow. This account has no 2FA.
+
+    The steps come in any order: "Pick an account" when the profile remembers one (a saved tile
+    can lead back to the email step, so take "Use another account"), the email page keeps a
+    hidden password input, and "Stay signed in?" -> Yes keeps the session in the profile."""
     user, pwd = read_creds()
     log("[auth] session expired or absent - signing in automatically...")
-
-    page.fill('input[type="email"], input[name="loginfmt"]', user, timeout=60000)
-    page.click('input[type="submit"], button[type="submit"]')
-
-    page.wait_for_selector('input[type="password"]', timeout=60000)
-    page.fill('input[type="password"]', pwd)
-    page.click('input[type="submit"], button[type="submit"]')
-
-    # "Stay signed in?" -> Yes, so the profile keeps the session
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        if "businesscentral.dynamics.com" in page.url:
-            break
+    password_sent = False
+    deadline = time.time() + 240
+    while time.time() < deadline and _at_login(page):
         try:
             body = page.inner_text("body", timeout=5000)
         except Exception:
             time.sleep(2)
             continue
-        if "Stay signed in" in body:
-            try:
-                page.click('input[type="submit"][value="Yes"], #idSIButton9', timeout=10000)
-            except Exception:
-                pass
-        time.sleep(2)
+        if "password is incorrect" in body:
+            raise RuntimeError("Microsoft rejected the tanager-bc password in cred")
+        if "Pick an account" in body:
+            page.get_by_text("Use another account").first.click()
+        elif "Stay signed in" in body:
+            page.locator('#idSIButton9, input[type="submit"][value="Yes"], button:has-text("Yes")').first.click()
+        elif "keep your account secure" in body:
+            page.get_by_text("Not now").first.click()
+        elif not password_sent and _visible(page, 'input[type="password"]'):
+            _visible(page, 'input[type="password"]').fill(pwd)
+            _visible(page, 'input[type="submit"], button:has-text("Sign in")').click()
+            password_sent = True
+        elif _visible(page, 'input[type="email"], input[name="loginfmt"]'):
+            _visible(page, 'input[type="email"], input[name="loginfmt"]').fill(user)
+            _visible(page, 'input[type="submit"], button[type="submit"]').click()
+        time.sleep(3)
 
     if "businesscentral.dynamics.com" not in page.url:
         raise RuntimeError(f"sign-in did not reach BC; at {page.url}")

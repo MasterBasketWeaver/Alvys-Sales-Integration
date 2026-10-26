@@ -20,7 +20,9 @@ AUTHORITY  = f"https://login.microsoftonline.com/{TENANT_ID}"
 from project_paths import PROJECT_ROOT
 
 BASE       = PROJECT_ROOT                               # above the repo: kept out of git
-CACHE_FILE = os.path.join(BASE, "bc_token_cache.bin")   # persistent MSAL cache
+# Shared with the Tanager tooling (same tenant, client and scope), whose bcadmin sign-in it holds.
+CACHE_FILE = os.environ.get("BC_TOKEN_CACHE",
+                            os.path.expanduser("~/work/clients/tanager/bc_token_cache.bin"))
 TOKEN_FILE = os.path.join(BASE, "bc_token.json")        # legacy/compat dump
 
 
@@ -52,10 +54,20 @@ def get_access_token(interactive=True):
     app = _app(cache)
     result = None
 
-    # 1) silent from persisted cache
+    from bc_session import read_creds
+    username, password = read_creds()
+
+    # 1) silent from persisted cache; it holds other accounts too, so prefer the BC sign-in's
     accounts = app.get_accounts()
+    accounts = [a for a in accounts if a.get("username", "").lower() == username.lower()] or accounts
     if accounts:
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
+
+    # 1b) bcadmin has no MFA, so username/password works where the cache has expired
+    if not result:
+        result = app.acquire_token_by_username_password(username, password, scopes=SCOPES)
+        if "access_token" not in result:
+            result = None
 
     # 2) seed cache from the legacy bc_token.json refresh_token (no re-2FA)
     if not result and os.path.exists(TOKEN_FILE):
