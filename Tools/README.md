@@ -57,6 +57,11 @@ reintroduce the old Playwright drivers for the AL Test Tool (page 130401).
 
 Nothing external seeds, adjusts or inspects the data before or after a run.
 
+To read or edit the Alvys Sales Setup from a script, use the test app's setup API page (89960):
+`GET`/`PATCH .../api/bryana/alvys/v1.0/companies({companyId})/alvysSalesSetups({id})`, and `POST
+...alvysSalesSetups({id})/Microsoft.NAV.refreshAccessToken` for the card's Refresh Access Token.
+`clientSecret` is write-only (always reads back blank; `clientSecretSet` says whether one is stored).
+
 ## Testing in production
 
 Business Central runs `Subtype = Test` and `TestRunner` codeunits only in sandboxes; in a production
