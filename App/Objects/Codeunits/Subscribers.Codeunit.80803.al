@@ -13,7 +13,7 @@ codeunit 80803 "BAASI Subscribers"
         SingleInstance.ClearDeductionRecIds();
         if AlvysSetup.Get() and AlvysSetup.Enabled then begin
             AlvysSalesMgt.GetTruckDimensionCode();
-            if SalesHeader."Document Type" in [SalesHeader."Document Type"::Order, SalesHeader."Document Type"::Invoice] then
+            if SalesHeader."Document Type" in [SalesHeader."Document Type"::Order, SalesHeader."Document Type"::Invoice] and (SalesHeader."FRI Fleetrock Repair Order No." <> '') then
                 if (AlvysSalesMgt.GetTruckDimensionValue(SalesHeader."Dimension Set ID") <> '') and (AlvysSalesMgt.GetTruckDimensionValue(SalesInvHeader."Dimension Set ID") <> '') then
                     SingleInstance.SetSalesDocuments(SalesHeader."No.", SalesInvHeader."No.");
         end
