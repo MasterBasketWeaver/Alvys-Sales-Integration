@@ -207,6 +207,65 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 #if not PRODUCTION
     [Test]
 #endif
+    procedure PostingInvoiceNotFromFleetrockCreatesNoDeduction()
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SalesInvHeader: Record "Sales Invoice Header";
+        InvoiceNo: Code[20];
+    begin
+        // [SCENARIO] Only invoices from a Fleetrock repair order become Alvys deductions: an invoice
+        // entered by hand on a truck posts without the truck lookup or a deduction.
+        Initialize();
+        AlvysSetup.Get();
+        AlvysSetup.TestField(Enabled);
+
+        // [GIVEN] A hand-entered invoice on a truck Alvys does not know, with no repair order
+        InvoiceNo := CreateTruckInvoice('NOTINALVYS', '');
+
+        // [WHEN] It is posted
+        PostInvoice(InvoiceNo, SalesInvHeader);
+
+        // [THEN] Nothing was sent to Alvys for it
+        AlvysDeduction.SetRange("Posted Document No.", SalesInvHeader."No.");
+        Assert.IsTrue(AlvysDeduction.IsEmpty(), 'An invoice not from Fleetrock should not create an Alvys deduction.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure PostingInvoiceFromFleetrockCreatesDeduction()
+    var
+        AlvysSetup: Record "BAASI Alvys Sales Setup";
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SalesInvHeader: Record "Sales Invoice Header";
+        InvoiceNo: Code[20];
+    begin
+        // [SCENARIO] The same invoice carrying a Fleetrock repair order number still becomes a deduction.
+        Initialize();
+        AlvysSetup.Get();
+        AlvysSetup.TestField(Enabled);
+
+        // [GIVEN] An invoice on truck TEST420 carrying a repair order number
+        InvoiceNo := CreateTruckInvoice('TEST420', 'ALVYS-TEST-RO');
+
+        // [WHEN] It is posted
+        PostInvoice(InvoiceNo, SalesInvHeader);
+
+        // [THEN] A deduction was created for the truck and linked to the posted invoice
+        AlvysDeduction.SetRange("Posted Document No.", SalesInvHeader."No.");
+        Assert.IsTrue(AlvysDeduction.FindFirst(), 'An invoice from Fleetrock should create an Alvys deduction.');
+        Assert.AreEqual('TEST420', AlvysDeduction."Truck Number", 'The deduction should be for the truck on the invoice.');
+        SalesInvHeader.CalcFields("Amount Including VAT");
+        Assert.AreEqual(-SalesInvHeader."Amount Including VAT", AlvysDeduction.Amount, 'The deduction should be the invoice total, negated.');
+        Assert.IsTrue(AlvysSalesMgt.DoesDeductionExist(AlvysDeduction.Id), 'The deduction should exist in Alvys.');
+
+        CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
     procedure CreateDeductionWithBlankAssetIDFails()
     begin
         // [SCENARIO] A deduction cannot be created without a truck or driver Id.
@@ -3418,6 +3477,11 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
     /// created if the company does not already have one; test isolation rolls it back afterwards.
     /// </summary>
     local procedure TractorCodeDimensionSetID(TractorCode: Code[20]): Integer
+    begin
+        exit(AddTractorCode(0, TractorCode));
+    end;
+
+    local procedure AddTractorCode(DimSetID: Integer; TractorCode: Code[20]): Integer
     var
         DimValue: Record "Dimension Value";
         TempDimSetEntry: Record "Dimension Set Entry" temporary;
@@ -3432,12 +3496,83 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
             DimValue.Insert(true);
         end;
 
+        DimMgt.GetDimensionSet(TempDimSetEntry, DimSetID);
+        if TempDimSetEntry.Get(DimSetID, DimValue."Dimension Code") then
+            TempDimSetEntry.Delete();
         TempDimSetEntry.Init();
+        TempDimSetEntry."Dimension Set ID" := DimSetID;
         TempDimSetEntry."Dimension Code" := DimValue."Dimension Code";
         TempDimSetEntry."Dimension Value Code" := DimValue.Code;
         TempDimSetEntry."Dimension Value ID" := DimValue."Dimension Value ID";
         TempDimSetEntry.Insert();
         exit(DimMgt.GetDimensionSetID(TempDimSetEntry));
+    end;
+
+    /// <summary>
+    /// A sales invoice entered by hand for the Fleetrock test customer, on the given truck. A
+    /// non-blank RepairOrderNo makes it look as if the Fleetrock import had created it.
+    /// </summary>
+    local procedure CreateTruckInvoice(TractorCode: Code[20]; RepairOrderNo: Code[20]): Code[20]
+    var
+        Customer: Record Customer;
+        FleetrockSetup: Record "FRI Fleetrock Setup";
+        ImportedInvHeader: Record "Sales Invoice Header";
+        SalesHeader: Record "Sales Header";
+        SalesLine: Record "Sales Line";
+        DimMgt: Codeunit DimensionManagement;
+        EntityCode: Code[20];
+    begin
+        Customer.SetRange("FRI Fleetrock Source No.", 'Double Diamond - Test');
+        Assert.IsTrue(Customer.FindFirst(), 'A customer mapped to the Fleetrock test customer account should exist.');
+        FleetrockSetup.Get();
+        FleetrockSetup.TestField("Labor G/L Account No.");
+        FleetrockSetup.TestField("Labor Tax Group Code");
+        // MEM refuses lines without an entity; use the one the Fleetrock import puts on its invoices.
+        ImportedInvHeader.SetFilter("FRI Fleetrock Repair Order No.", '<>%1', '');
+        ImportedInvHeader.SetFilter("Shortcut Dimension 1 Code", '<>%1', '');
+        Assert.IsTrue(ImportedInvHeader.FindLast(), 'A posted invoice imported from Fleetrock should exist to take the entity from.');
+        EntityCode := ImportedInvHeader."Shortcut Dimension 1 Code";
+
+        SalesHeader.Init();
+        SalesHeader."Document Type" := SalesHeader."Document Type"::Invoice;
+        SalesHeader.Insert(true);
+        SalesHeader.Validate("Sell-to Customer No.", Customer."No.");
+        SalesHeader.Validate("Shortcut Dimension 1 Code", EntityCode);
+        // Not validated: validating the location rebuilds the dimensions and would drop the truck.
+        // Another app in the sandbox refuses to post without one.
+        SalesHeader."Location Code" := 'TEST';
+        SalesHeader."FRI Fleetrock Repair Order No." := RepairOrderNo;
+        SalesHeader."Dimension Set ID" := AddTractorCode(SalesHeader."Dimension Set ID", TractorCode);
+        DimMgt.UpdateGlobalDimFromDimSetID(SalesHeader."Dimension Set ID", SalesHeader."Shortcut Dimension 1 Code", SalesHeader."Shortcut Dimension 2 Code");
+        SalesHeader.Modify(true);
+
+        SalesLine.Init();
+        SalesLine."Document Type" := SalesHeader."Document Type";
+        SalesLine."Document No." := SalesHeader."No.";
+        SalesLine."Line No." := 10000;
+        SalesLine.Validate(Type, SalesLine.Type::"G/L Account");
+        SalesLine.Validate("No.", FleetrockSetup."Labor G/L Account No.");
+        SalesLine.Validate(Quantity, 1);
+        SalesLine.Validate("Unit Price", 1.25);
+        SalesLine.Validate("Tax Group Code", FleetrockSetup."Labor Tax Group Code");
+        SalesLine.Validate("Shortcut Dimension 1 Code", EntityCode);
+        SalesLine."Location Code" := 'TEST';
+        SalesLine."Dimension Set ID" := AddTractorCode(SalesLine."Dimension Set ID", TractorCode);
+        DimMgt.UpdateGlobalDimFromDimSetID(SalesLine."Dimension Set ID", SalesLine."Shortcut Dimension 1 Code", SalesLine."Shortcut Dimension 2 Code");
+        SalesLine.Insert(true);
+        exit(SalesHeader."No.");
+    end;
+
+    local procedure PostInvoice(InvoiceNo: Code[20]; var SalesInvHeader: Record "Sales Invoice Header")
+    var
+        SalesHeader: Record "Sales Header";
+    begin
+        SalesHeader.Get(SalesHeader."Document Type"::Invoice, InvoiceNo);
+        // Codeunit.Run with a return value cannot start inside a write transaction.
+        Commit();
+        Assert.IsTrue(Codeunit.Run(Codeunit::"Sales-Post", SalesHeader), StrSubstNo('Posting invoice %1 should succeed: %2', InvoiceNo, GetLastErrorText()));
+        SalesInvHeader.SetRange("Pre-Assigned No.", InvoiceNo);
+        Assert.IsTrue(SalesInvHeader.FindFirst(), StrSubstNo('Invoice %1 should have been posted.', InvoiceNo));
     end;
 
     var
