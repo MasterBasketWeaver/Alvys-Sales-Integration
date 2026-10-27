@@ -6,6 +6,11 @@ Usage: bc-publish-pte.py <project-path>
        Add --force-sync to allow destructive schema changes (removed fields), which drops their data.
        Add --define SYMBOLS (comma-separated) to compile with those preprocessor symbols defined.
 
+In Production the Alvys job queue entries in Texas Transportation Group are set On Hold
+(bc-job-queue.py hold) before the upload and back to Ready once the deployment has completed. If
+the deployment fails they stay On Hold, so the old version doesn't run half-upgraded jobs; resume
+them with `BC_ENV=Production bc-job-queue.py resume` once the app is installed.
+
 --app uploads an already-built .app as it is, without compiling. BC refuses a different file under an
 app id + version it has received before, so re-installing a version elsewhere (another environment)
 has to use the exact file that was uploaded the first time. Every uploaded build is kept read-only
@@ -34,6 +39,7 @@ import requests
 
 from bc_auth import get_access_token
 from bc_keep_build import keep_build
+from project_paths import TOOLS
 
 TENANT = "0b8281e8-7af6-4870-bd74-03d5eed3e4a0"
 ENV = os.environ.get("BC_ENV", "MCSandbox_09222026")
@@ -42,11 +48,22 @@ ROOT = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT}/{ENV}"
 ALC = "/home/bryan/.vscode/extensions/ms-dynamics-smb.al-17.0.2273547/bin/linux/alc"
 
 
+held_job_queues = False
+
+
 def die(msg, resp=None):
     print(f"ERROR: {msg}")
     if resp is not None:
         print(f"  HTTP {resp.status_code}: {resp.text[:1500]}")
+    if held_job_queues:
+        print("The Texas Transportation Group Alvys job queue entries are still On Hold. Once the app is "
+              f"installed, run: BC_ENV={ENV} {os.path.join(TOOLS, 'bc-job-queue.py')} resume")
     sys.exit(1)
+
+
+def job_queues(action):
+    r = subprocess.run([sys.executable, "-u", os.path.join(TOOLS, "bc-job-queue.py"), action], env={**os.environ, "BC_ENV": ENV})
+    return r.returncode == 0
 
 
 def manifest_of_app(path):
@@ -142,6 +159,12 @@ for ext in published():
     elif ext["isInstalled"] and installed >= version:
         die(f"{kind} {'.'.join(map(str, installed))} is installed; a PTE upload needs a higher version than that")
 
+if ENV.lower() == "production":
+    print("  Holding the Texas Transportation Group Alvys job queue entries...")
+    held_job_queues = True
+    if not job_queues("hold"):
+        die("could not set the job queue entries On Hold; nothing was uploaded")
+
 print("[3/4] Uploading...")
 upload_settings = {"schedule": "Current version", "schemaSyncMode": "Force Sync" if force_sync else "Add"}
 # An upload BC refuses leaves its record behind, the API cannot delete it, and its key is always 0,
@@ -183,6 +206,12 @@ while time.time() < deadline:
             die("deployment failed; see page 2508 -> the row -> Summary 'View Details' for why")
 else:
     die("timed out waiting for the deployment")
+
+if held_job_queues:
+    print("  Setting the Texas Transportation Group Alvys job queue entries back to Ready...")
+    if not job_queues("resume"):
+        die("the app is installed, but the job queue entries could not all be set back to Ready")
+    held_job_queues = False
 
 for ext in published():
     if ext["isInstalled"]:

@@ -9,8 +9,9 @@ Build, publish and BC-session tooling for the Alvys AL projects.
 | Script | Purpose |
 | --- | --- |
 | `bc-publish.sh [project-path]` | Compile with `alc` and publish to the sandbox dev endpoint. Defaults to the App project. |
-| `bc-publish-pte.py <project-path> [--force-sync] [--define SYMBOLS]` | Compile with `alc` (with `--define`, those preprocessor symbols), or reuse the kept build of that version in `<project>/output/` (`output/<symbols>/` with `--define`), and install as a per-tenant extension through the automation API's `extensionUpload`, uninstalling and unpublishing a dev copy of the same app first. Needs a version never uploaded before: BC refuses an app id + version it has already received, even after it was unpublished. Every uploaded build is kept there read-only; `--app <file> [--keep-dir DIR]` uploads a given build. |
-| `bc-publish-tests-production.py [--force-sync]` | Build the test app with the `PRODUCTION` preprocessor symbol and install it as a PTE in `BC_ENV` (default `Production`). Regenerates codeunit "BAASIT Test Dispatch" from the `[Test]` procedures first; see *Testing in production* below. |
+| `bc-publish-pte.py <project-path> [--force-sync] [--define SYMBOLS]` | Compile with `alc` (with `--define`, those preprocessor symbols), or reuse the kept build of that version in `<project>/output/` (`output/<symbols>/` with `--define`), and install as a per-tenant extension through the automation API's `extensionUpload`, uninstalling and unpublishing a dev copy of the same app first. Needs a version never uploaded before: BC refuses an app id + version it has already received, even after it was unpublished. Every uploaded build is kept there read-only; `--app <file> [--keep-dir DIR]` uploads a given build. In `Production` it sets the Alvys job queue entries in Texas Transportation Group On Hold before the upload and back to Ready once the install has succeeded; after a failed install they stay On Hold (resume with `bc-job-queue.py`). |
+| `bc-job-queue.py show\|hold\|resume [--company NAME]` | Shows, holds or resumes the Alvys job queue entries (codeunits 80800..80849) in one company of `BC_ENV`, by default Texas Transportation Group, through page 672 in the web client (BC has no API for job queue entries). `hold` records the Ready entries it holds in `held-job-queues.json` in the project root, and `resume` sets only those back to Ready. |
+| `bc-publish-tests-production.py [--force-sync]` | Build the test app with the `PRODUCTION` preprocessor symbol and install it as a PTE in `BC_ENV` (default `Production`). Regenerates codeunit "BAASIT Test Dispatch" from the `[Test]` procedures first; see *Testing in production* below. Remove it from Production again once the run is done. |
 | `bc-token-race-test.py [--sessions N] [--rounds N]` | Refreshes the Alvys access token from several BC sessions at once through the test app's setup API page (89960) and reports any that fail. A save over a setup row another session had changed gave "Sorry, we just updated this page" and stopped the settlement poll's job queue entry in Production (2026-10-22). An AL test can't catch this: BC doesn't raise the conflict inside one transaction. |
 | `bc-symbols.py [project-path]` | Download `.app` symbols into the project's `.alpackages`. Defaults to the App project. |
 | `bc_auth.py` | OAuth device-code flow with a persistent token cache. `get_access_token()` is imported by the two scripts above. |
@@ -88,6 +89,9 @@ which `bc-publish-tests-production.py` passes):
 - A passing method is rolled back by ending in an error, which is finer than the sandbox's
   per-codeunit isolation, but anything a test commits stays in the company. `--keep-data` skips the
   rollback as it does in the sandbox.
+
+Don't leave the test app in Production: once the run is done, uninstall and unpublish it (automation
+API `extensions({packageId})/Microsoft.NAV.uninstall`, then `Microsoft.NAV.unpublish`).
 
 Add a test as usual, with the `#if not PRODUCTION` / `[Test]` / `#endif` lines around its attribute;
 the dispatch codeunit is regenerated on the next production publish. Give each production upload its
