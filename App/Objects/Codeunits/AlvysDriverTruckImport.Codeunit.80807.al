@@ -5,6 +5,7 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
     // the truck's VIN, the same way the Fleetrock repair order import names the ones it creates.
 
     Permissions = tabledata "BAASI Alvys Sales Setup" = R,
+        tabledata "BAASI Alvys Deduction" = R,
         tabledata "FRI Fleetrock Setup" = R,
         tabledata "Dimension Value" = RIM;
 
@@ -59,7 +60,7 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
         TruckNum: Text;
         AlvysID: Code[50];
         TruckCode: Code[20];
-        Inactive, IsNew : Boolean;
+        Inactive, Block, IsNew : Boolean;
     begin
         foreach T in TrucksArray do begin
             TruckObj := T.AsObject();
@@ -75,7 +76,11 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
             Inactive := JsonMgt.GetJsonValueAsText(TruckObj, 'Status').ToUpper() = InactiveTruckStatusTok;
             if FindOrInitDimValue(DimValue, OldDimValue, DimensionCode, AlvysID, TruckCode, Inactive, IsNew) then begin
                 FleetrockMgt.SetDimensionValueDriverName(DimValue, DimValue.Code, FleetrockUnits, FleetrockDrivers);
-                SaveDimValue(DimValue, OldDimValue, Inactive, IsNew);
+                Block := Inactive;
+                if Block then
+                    if TruckAwaitsSettlement(DimValue) then
+                        Block := false;
+                SaveDimValue(DimValue, OldDimValue, Block, IsNew);
             end;
         end;
     end;
@@ -109,6 +114,32 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
         end;
     end;
 
+    /// <summary>
+    /// Whether a deduction raised for the truck still has a settlement to post. The settlement's
+    /// payment line carries the invoice's dimensions, the truck among them, and a blocked truck
+    /// stops it posting, so the truck is blocked only by a run that finds nothing left to post.
+    /// A deduction split in Alvys is left out: its parts are deductions of their own and carry
+    /// the settlement.
+    /// </summary>
+    local procedure TruckAwaitsSettlement(var DimensionValue: Record "Dimension Value"): Boolean
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.SetFilter("Posted Document No.", '<>%1', '');
+        AlvysDeduction.SetRange("Split in Alvys", false);
+        AlvysDeduction.SetRange("Settlement Posted", false);
+        AlvysDeduction.SetRange("Truck Number", DimensionValue.Code);
+        if not AlvysDeduction.IsEmpty() then
+            exit(true);
+        if DimensionValue."BAASI Alvys ID" = '' then
+            exit(false);
+        AlvysDeduction.SetRange("Truck Number");
+        // Case-insensitive: the dimension value keeps the Alvys ID upper-cased, the deduction as
+        // Alvys returned it. Concatenated, as a substituted value would be quoted and lose the @.
+        AlvysDeduction.SetFilter("Truck Id", '@' + CopyStr(DimensionValue."BAASI Alvys ID", 1, MaxStrLen(AlvysDeduction."Truck Id")));
+        exit(not AlvysDeduction.IsEmpty());
+    end;
+
     local procedure IsInactiveDriver(var DriverObj: JsonObject): Boolean
     var
         JsonTkn: JsonToken;
@@ -129,8 +160,9 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
     /// The Alvys ID decides which dimension value a truck or driver is: the one in DimensionCode
     /// that already carries it. Failing that, the value coded ValueCode is linked to it, provided no
     /// other Alvys record has that value. Only then is a value
-    /// created, and only for something active: an inactive one blocks the value it already has,
-    /// and nothing is ever unblocked, so a value blocked by hand in Business Central stays blocked.
+    /// created, and only for something active: an inactive one blocks the value it already has
+    /// (a truck only once its settlements are posted), and nothing is ever unblocked, so a value
+    /// blocked by hand in Business Central stays blocked.
     /// </summary>
     local procedure FindOrInitDimValue(var DimValue: Record "Dimension Value"; var OldDimValue: Record "Dimension Value"; DimensionCode: Code[20]; AlvysID: Code[50]; ValueCode: Code[20]; Inactive: Boolean; var IsNew: Boolean): Boolean
     begin
@@ -171,9 +203,9 @@ codeunit 80807 "BAASI Alvys Driver/Truck Imp."
         exit(true);
     end;
 
-    local procedure SaveDimValue(var DimValue: Record "Dimension Value"; OldDimValue: Record "Dimension Value"; Inactive: Boolean; IsNew: Boolean)
+    local procedure SaveDimValue(var DimValue: Record "Dimension Value"; OldDimValue: Record "Dimension Value"; Block: Boolean; IsNew: Boolean)
     begin
-        if Inactive and not DimValue.Blocked then
+        if Block and not DimValue.Blocked then
             DimValue.Validate(Blocked, true);
         if IsNew then
             DimValue.Insert(true)

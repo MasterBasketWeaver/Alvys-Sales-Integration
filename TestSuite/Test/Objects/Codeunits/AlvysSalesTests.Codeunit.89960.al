@@ -2292,6 +2292,130 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 #if not PRODUCTION
     [Test]
 #endif
+    procedure PollKeepsTheDescriptionAlvysHasForADeduction()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+    begin
+        // [SCENARIO] Alvys users edit a deduction's description after Business Central sends it.
+        // The poll keeps the text Alvys has now, paid or not, beside the Description sent.
+        Initialize();
+
+        // [GIVEN] An unpaid deduction, and a search returning it still unpaid under an edited text
+        LoggedDeduction(SentDescriptionTok, -465.12, false, AlvysDeduction);
+        AddPartItem(Items, AlvysDeduction.Id, AlvysDeduction."Group Id", AlvysDeduction.Amount, false, EditedDescriptionTok);
+
+        // [WHEN] The poll reads the search
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] The edited text is kept, and the Description sent is left as it was
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.AreEqual(EditedDescriptionTok, AlvysDeduction."Alvys Description", 'The poll should keep the description the deduction has in Alvys.');
+        Assert.AreEqual(SentDescriptionTok, AlvysDeduction.Description, 'The description Business Central sent should be kept.');
+        Assert.IsFalse(AlvysDeduction."Is Paid", 'A deduction returned unpaid should stay unpaid.');
+
+        // [WHEN] A later search returns it paid under a text edited again
+        Clear(Items);
+        AddPartItem(Items, AlvysDeduction.Id, AlvysDeduction."Group Id", AlvysDeduction.Amount, true, EditedAgainDescriptionTok);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] It is paid and carries the latest text
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        Assert.IsTrue(AlvysDeduction."Is Paid", 'A deduction returned paid should be marked paid.');
+        Assert.AreEqual(EditedAgainDescriptionTok, AlvysDeduction."Alvys Description", 'The poll should keep the latest description Alvys has.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure StatementLineWithTheAlvysDescriptionLinksTheDeduction()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        Items, Statements : JsonArray;
+    begin
+        // [SCENARIO] A statement line carries the text the deduction has in Alvys, not the one
+        // Business Central sent, so a deduction whose description was edited in Alvys is still
+        // found on the statement that paid it.
+        Initialize();
+
+        // [GIVEN] A deduction the poll reads back paid under an edited text, and a statement whose
+        // line carries that text
+        LoggedDeduction(SentDescriptionTok, -465.12, false, AlvysDeduction);
+        AddPartItem(Items, AlvysDeduction.Id, AlvysDeduction."Group Id", AlvysDeduction.Amount, true, EditedDescriptionTok);
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+        AddStatement(Statements, 990030, WorkDate() - 4, OwnerOperatorTok, EditedDescriptionTok, AlvysDeduction.Amount);
+
+        // [WHEN] The poll matches the statements
+        MatchOnly(AlvysDeduction, Statements);
+
+        // [THEN] The deduction is linked to that statement and takes its date
+        Assert.AreEqual(990030, AlvysDeduction."Statement No.", 'A deduction edited in Alvys should be linked to the statement line carrying its Alvys text.');
+        Assert.AreEqual(WorkDate() - 4, AlvysDeduction."Statement Date", 'The deduction should take the date of the statement that paid it.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure StatementLineWithTheDescriptionSentLinksTheDeduction()
+    var
+        WithoutAlvysText, EditedLater : Record "BAASI Alvys Deduction";
+        Statements: JsonArray;
+    begin
+        // [SCENARIO] The description Business Central sent still links a deduction the poll has no
+        // Alvys text for, and one edited in Alvys after its statement was generated.
+        Initialize();
+
+        // [GIVEN] A paid deduction with no Alvys description, one whose Alvys description differs
+        // from the line, and a statement listing both under the descriptions sent
+        LoggedDeduction(SentDescriptionTok, -12.34, true, WithoutAlvysText);
+        LoggedDeduction(SentDescriptionTok, -56.78, true, EditedLater);
+        EditedLater."Alvys Description" := EditedDescriptionTok;
+        EditedLater.Modify(true);
+        AddStatement(Statements, 990031, WorkDate() - 6, OwnerOperatorTok, SentDescriptionTok, WithoutAlvysText.Amount);
+        AddStatementLine(Statements, 990031, SentDescriptionTok, EditedLater.Amount);
+
+        // [WHEN] The poll matches the statements
+        MatchOnly(WithoutAlvysText, Statements);
+        MatchOnly(EditedLater, Statements);
+
+        // [THEN] Both are linked through the description sent
+        Assert.AreEqual(990031, WithoutAlvysText."Statement No.", 'A deduction without an Alvys description should be matched on the description sent.');
+        Assert.AreEqual(WorkDate() - 6, WithoutAlvysText."Statement Date", 'The deduction should take the date of the statement that paid it.');
+        Assert.AreEqual(990031, EditedLater."Statement No.", 'A statement line carrying the description sent should still be matched after an edit in Alvys.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure SplitPartsKeepTheDescriptionAlvysGaveThem()
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        SplitPart: Record "BAASI Alvys Deduction";
+        Items: JsonArray;
+        PartId: Text;
+    begin
+        // [SCENARIO] A part of a split is logged with the text Alvys gave it, which is what its
+        // statement line carries.
+        Initialize();
+
+        // [GIVEN] A deduction Alvys has split, its parts named after the edited text
+        LoggedDeduction(SentDescriptionTok, -1.25, false, AlvysDeduction);
+        PartId := AlvysStyleId();
+        AddPartItem(Items, PartId, AlvysDeduction."Group Id", -0.75, false, EditedDescriptionTok + ' (part 1)');
+        AddPartItem(Items, AlvysStyleId(), AlvysDeduction."Group Id", -0.5, false, EditedDescriptionTok + ' (part 2)');
+
+        // [WHEN] The poll reads the search
+        AlvysSettlementPoll.RefreshFromSearch(Items);
+
+        // [THEN] The part carries the text Alvys gave it
+        AlvysDeduction.Get(AlvysDeduction."Entry No.");
+        FindSplitPart(AlvysDeduction, PartId, SplitPart);
+        Assert.AreEqual(EditedDescriptionTok + ' (part 1)', SplitPart."Alvys Description", 'A split part should keep the description Alvys gave it.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
     procedure DeductionNoStatementListsPostsOnTheWorkDate()
     var
         AlvysDeduction: Record "BAASI Alvys Deduction";
@@ -2626,6 +2750,32 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
 
         SetAutoPostDeductions(WasAutoPost);
         CleanUpDeduction(AlvysDeduction.Id);
+    end;
+
+    /// <summary>
+    /// A deduction logged against a posted invoice without raising it in Alvys, for tests that
+    /// only read a search or statements built by the test and so never reach Alvys or the invoice.
+    /// </summary>
+    local procedure LoggedDeduction(Description: Text; Amount: Decimal; IsPaid: Boolean; var AlvysDeduction: Record "BAASI Alvys Deduction")
+    var
+        AlvysDeduction2: Record "BAASI Alvys Deduction";
+        EntryNo: Integer;
+    begin
+        if AlvysDeduction2.FindLast() then
+            EntryNo := AlvysDeduction2."Entry No.";
+        AlvysDeduction.Init();
+        AlvysDeduction."Entry No." := EntryNo + 1;
+        AlvysDeduction.Id := CopyStr(AlvysStyleId(), 1, MaxStrLen(AlvysDeduction.Id));
+        AlvysDeduction."Group Id" := CopyStr(AlvysStyleId(), 1, MaxStrLen(AlvysDeduction."Group Id"));
+        AlvysDeduction.Description := CopyStr(Description, 1, MaxStrLen(AlvysDeduction.Description));
+        AlvysDeduction.Amount := Amount;
+        AlvysDeduction."Remaining Amount" := Amount;
+        AlvysDeduction.Date := WorkDate();
+        AlvysDeduction."Is Paid" := IsPaid;
+        AlvysDeduction."Owner Operator Id" := OwnerOperatorTok;
+        AlvysDeduction."Document Type" := AlvysDeduction."Document Type"::"Sales Invoice";
+        AlvysDeduction."Posted Document No." := LoggedInvoiceNoTok;
+        AlvysDeduction.Insert(true);
     end;
 
     local procedure MatchOnly(var AlvysDeduction: Record "BAASI Alvys Deduction"; var Statements: JsonArray)
@@ -3584,4 +3734,8 @@ codeunit 89960 "BAASIT Alvys Sales Tests"
         PostedDocumentNoMissingTxt: Label 'must have a Posted Document No. specified before it can be applied.', Locked = true;
         OwnerOperatorTok: Label 'DRTEST0000000000000001', Locked = true;
         SandboxOwnerOperatorTok: Label 'DR2516397705002552078', Locked = true;
+        SentDescriptionTok: Label 'BC Invoice TEST BAASIT-INV-1 FR Repair Order 9990001 ', Locked = true;
+        EditedDescriptionTok: Label 'FR Repair Order 9990001 ', Locked = true;
+        EditedAgainDescriptionTok: Label 'FR - Repair Order 9990001 ', Locked = true;
+        LoggedInvoiceNoTok: Label 'BAASIT-INV-1', Locked = true;
 }

@@ -25,6 +25,7 @@ page 80802 "BAASI Alvys Deductions"
                 field("Group Id"; Rec."Group Id") { }
                 field(Type; Rec.Type) { }
                 field(Description; Rec.Description) { }
+                field("Alvys Description"; Rec."Alvys Description") { }
                 field(Category; Rec.Category) { }
                 field(Amount; Rec.Amount) { }
                 field("Remaining Amount"; Rec."Remaining Amount")

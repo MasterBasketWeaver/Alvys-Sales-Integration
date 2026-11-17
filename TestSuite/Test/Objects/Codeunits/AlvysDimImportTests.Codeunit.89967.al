@@ -178,6 +178,131 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
 #if not PRODUCTION
     [Test]
 #endif
+    procedure ImportTrucksKeepsInactiveTruckOpenUntilItsSettlementIsPosted()
+    var
+        DimValue: Record "Dimension Value";
+        Trucks, FleetrockUnits, FleetrockDrivers : JsonArray;
+        EntryNo: Integer;
+    begin
+        // [SCENARIO] A settlement's payment line carries the invoice's truck, so an inactive truck
+        // stays unblocked while a deduction raised for it still has a settlement to post, and is
+        // blocked by the first import after that settlement is posted.
+        Initialize();
+
+        // [GIVEN] An inactive truck with a deduction on a posted invoice whose settlement is not posted
+        InsertDimValue(TruckDimTok, 'BT-951', '', false);
+        EntryNo := InsertTruckDeduction('BT-951', '', false, false, 0);
+        Trucks.Add(Truck('BT-951', InactiveTok));
+
+        // [WHEN] The trucks are imported
+        DimensionImport.ImportTrucks(TruckDimTok, Trucks, FleetrockUnits, FleetrockDrivers);
+
+        // [THEN] It is linked but not blocked
+        DimValue.Get(TruckDimTok, 'BT-951');
+        Assert.IsFalse(DimValue.Blocked, 'An inactive truck with a settlement still to post should not be blocked.');
+        Assert.AreEqual('TR-BT-951', DimValue."BAASI Alvys ID", 'The truck should still be linked to its Alvys truck.');
+
+        // [WHEN] The settlement is posted and the trucks are imported again
+        MarkSettlementPosted(EntryNo);
+        DimensionImport.ImportTrucks(TruckDimTok, Trucks, FleetrockUnits, FleetrockDrivers);
+
+        // [THEN] It is blocked
+        DimValue.Get(TruckDimTok, 'BT-951');
+        Assert.IsTrue(DimValue.Blocked, 'An inactive truck should be blocked once its settlements are posted.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure ImportTrucksKeepsInactiveTruckOpenForDeductionOnItsAlvysID()
+    var
+        DimValue: Record "Dimension Value";
+        Trucks, FleetrockUnits, FleetrockDrivers : JsonArray;
+    begin
+        // [SCENARIO] A deduction names its truck by the Alvys truck Id as well as by number. One
+        // raised under another truck number, but on the same Alvys truck, holds the truck too,
+        // whatever the case of the Id.
+        Initialize();
+
+        // [GIVEN] An inactive truck linked to its Alvys truck, and an unposted deduction carrying
+        // that truck's Id in lower case under another number
+        InsertLinkedDimValue(TruckDimTok, 'BT-952', 'TR-BT-952');
+        InsertTruckDeduction('BT-952-OLD', 'tr-bt-952', false, false, 0);
+        Trucks.Add(Truck('BT-952', InactiveTok));
+
+        // [WHEN] The trucks are imported
+        DimensionImport.ImportTrucks(TruckDimTok, Trucks, FleetrockUnits, FleetrockDrivers);
+
+        // [THEN] It is not blocked
+        DimValue.Get(TruckDimTok, 'BT-952');
+        Assert.IsFalse(DimValue.Blocked, 'An inactive truck with an unposted deduction on its Alvys Id should not be blocked.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure ImportTrucksBlocksInactiveTruckWithNothingToPost()
+    var
+        DimValue: Record "Dimension Value";
+        Trucks, FleetrockUnits, FleetrockDrivers : JsonArray;
+    begin
+        // [SCENARIO] Only a deduction on a posted invoice whose settlement is not posted holds a
+        // truck: one already posted, or one on a document never posted, does not.
+        Initialize();
+
+        // [GIVEN] An inactive truck with a posted settlement and a deduction on an unposted document
+        InsertDimValue(TruckDimTok, 'BT-953', '', false);
+        InsertTruckDeduction('BT-953', 'TR-BT-953', true, false, 0);
+        InsertTruckDeduction('BT-953', 'TR-BT-953', false, false, 0, '');
+        Trucks.Add(Truck('BT-953', InactiveTok));
+
+        // [WHEN] The trucks are imported
+        DimensionImport.ImportTrucks(TruckDimTok, Trucks, FleetrockUnits, FleetrockDrivers);
+
+        // [THEN] It is blocked
+        DimValue.Get(TruckDimTok, 'BT-953');
+        Assert.IsTrue(DimValue.Blocked, 'An inactive truck with no settlement left to post should be blocked.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
+    procedure ImportTrucksHoldsInactiveTruckForUnpostedSplitPartsOnly()
+    var
+        DimValue: Record "Dimension Value";
+        Trucks, FleetrockUnits, FleetrockDrivers : JsonArray;
+        SplitEntryNo: Integer;
+    begin
+        // [SCENARIO] A deduction split in Alvys is settled by its parts, so the parts decide
+        // whether its truck is held: an unposted part holds it, and the split deduction alone does
+        // not, even while it is not marked posted.
+        Initialize();
+
+        // [GIVEN] One inactive truck whose split deduction has a part still to post, and another
+        // whose split deduction is not marked posted though its only part is
+        InsertDimValue(TruckDimTok, 'BT-954', '', false);
+        SplitEntryNo := InsertTruckDeduction('BT-954', 'TR-BT-954', false, true, 0);
+        InsertTruckDeduction('BT-954', 'TR-BT-954', true, false, SplitEntryNo);
+        InsertTruckDeduction('BT-954', 'TR-BT-954', false, false, SplitEntryNo);
+        InsertDimValue(TruckDimTok, 'BT-955', '', false);
+        SplitEntryNo := InsertTruckDeduction('BT-955', 'TR-BT-955', false, true, 0);
+        InsertTruckDeduction('BT-955', 'TR-BT-955', true, false, SplitEntryNo);
+        Trucks.Add(Truck('BT-954', InactiveTok));
+        Trucks.Add(Truck('BT-955', InactiveTok));
+
+        // [WHEN] The trucks are imported
+        DimensionImport.ImportTrucks(TruckDimTok, Trucks, FleetrockUnits, FleetrockDrivers);
+
+        // [THEN] The first is held by its unposted part and the second is blocked
+        DimValue.Get(TruckDimTok, 'BT-954');
+        Assert.IsFalse(DimValue.Blocked, 'An inactive truck with an unposted split part should not be blocked.');
+        DimValue.Get(TruckDimTok, 'BT-955');
+        Assert.IsTrue(DimValue.Blocked, 'A split deduction whose parts are posted should not hold its truck.');
+    end;
+
+#if not PRODUCTION
+    [Test]
+#endif
     procedure ImportTrucksDoesNotBlockTruckInShop()
     var
         DimValue: Record "Dimension Value";
@@ -908,6 +1033,41 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         DimValue.Modify(true);
     end;
 
+    local procedure InsertTruckDeduction(TruckNumber: Text[50]; TruckId: Text[50]; SettlementPosted: Boolean; SplitInAlvys: Boolean; SplitFromEntryNo: Integer): Integer
+    begin
+        exit(InsertTruckDeduction(TruckNumber, TruckId, SettlementPosted, SplitInAlvys, SplitFromEntryNo, PostedInvoiceNoTok));
+    end;
+
+    local procedure InsertTruckDeduction(TruckNumber: Text[50]; TruckId: Text[50]; SettlementPosted: Boolean; SplitInAlvys: Boolean; SplitFromEntryNo: Integer; PostedDocumentNo: Code[20]): Integer
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+        EntryNo: Integer;
+    begin
+        if AlvysDeduction.FindLast() then
+            EntryNo := AlvysDeduction."Entry No.";
+        AlvysDeduction.Init();
+        AlvysDeduction."Entry No." := EntryNo + 1;
+        AlvysDeduction.Id := CopyStr(DelChr(Format(CreateGuid()), '=', '{}'), 1, MaxStrLen(AlvysDeduction.Id));
+        AlvysDeduction."Truck Number" := TruckNumber;
+        AlvysDeduction."Truck Id" := TruckId;
+        AlvysDeduction."Document Type" := AlvysDeduction."Document Type"::"Sales Invoice";
+        AlvysDeduction."Posted Document No." := PostedDocumentNo;
+        AlvysDeduction."Settlement Posted" := SettlementPosted;
+        AlvysDeduction."Split in Alvys" := SplitInAlvys;
+        AlvysDeduction."Split From Entry No." := SplitFromEntryNo;
+        AlvysDeduction.Insert(true);
+        exit(AlvysDeduction."Entry No.");
+    end;
+
+    local procedure MarkSettlementPosted(EntryNo: Integer)
+    var
+        AlvysDeduction: Record "BAASI Alvys Deduction";
+    begin
+        AlvysDeduction.Get(EntryNo);
+        AlvysDeduction."Settlement Posted" := true;
+        AlvysDeduction.Modify(true);
+    end;
+
     local procedure CountValues(DimensionCode: Code[20]): Integer
     var
         DimValue: Record "Dimension Value";
@@ -966,6 +1126,7 @@ codeunit 89967 "BAASIT Alvys Dim Import Tests"
         ActiveTok: Label 'Active', Locked = true;
         InactiveTok: Label 'Inactive', Locked = true;
         DeactivatedTok: Label 'Deactivated', Locked = true;
+        PostedInvoiceNoTok: Label 'BAASIT-INV-1', Locked = true;
         LiveTruckTok: Label 'TEST420', Locked = true;
         LiveDeactivatedTruckDriverTok: Label 'Aother Name', Locked = true;
         LiveDriverTok: Label 'Adam Test', Locked = true;

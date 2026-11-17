@@ -148,6 +148,13 @@ table 80802 "BAASI Alvys Deduction"
             Editable = false;
             Tooltip = 'The date of the Alvys statement that paid the deduction. The settlement payment is posted on this date; without a statement it is posted on the work date of the poll that applied it.';
         }
+        // Alvys users edit a deduction's description after Business Central sends it, and a
+        // statement line carries the edited text, so it is kept apart from the Description sent.
+        field(39; "Alvys Description"; Text[250])
+        {
+            Editable = false;
+            Tooltip = 'The description the deduction has in Alvys, refreshed by the settlement poll. It can differ from the Description Business Central sent when the deduction has been edited in Alvys. The statement that paid the deduction is found by this description, or by the Description when this one is blank or no statement line carries it.';
+        }
     }
 
     keys

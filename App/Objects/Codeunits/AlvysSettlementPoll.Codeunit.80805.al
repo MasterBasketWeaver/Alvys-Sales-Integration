@@ -142,17 +142,29 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
 
     local procedure RefreshDeduction(var AlvysDeduction: Record "BAASI Alvys Deduction"; var ItemObj: JsonObject)
     var
-        IsPaid: Boolean;
+        AlvysDescription: Text[250];
+        IsPaid, Changed : Boolean;
     begin
         IsPaid := JsonMgt.GetJsonValueAsBoolean(ItemObj, 'IsPaid');
         // Deductions logged before the owner operator was kept get it here, while still unpaid, so
         // their statement can be searched for once they are paid.
-        if (AlvysDeduction."Owner Operator Id" = '') or IsPaid then begin
-            if AlvysDeduction."Owner Operator Id" = '' then
-                AlvysDeduction."Owner Operator Id" := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'OwnerOperatorId'), 1, MaxStrLen(AlvysDeduction."Owner Operator Id"));
-            AlvysDeduction."Is Paid" := IsPaid;
-            AlvysDeduction.Modify(true);
+        if AlvysDeduction."Owner Operator Id" = '' then begin
+            AlvysDeduction."Owner Operator Id" := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'OwnerOperatorId'), 1, MaxStrLen(AlvysDeduction."Owner Operator Id"));
+            Changed := true;
         end;
+        if IsPaid then begin
+            AlvysDeduction."Is Paid" := true;
+            Changed := true;
+        end;
+        // The statement that pays the deduction carries the text it has in Alvys when the statement
+        // is generated, which an Alvys user may have edited since Business Central sent it.
+        AlvysDescription := CopyStr(JsonMgt.GetJsonValueAsText(ItemObj, 'Description'), 1, MaxStrLen(AlvysDescription));
+        if AlvysDescription <> AlvysDeduction."Alvys Description" then begin
+            AlvysDeduction."Alvys Description" := AlvysDescription;
+            Changed := true;
+        end;
+        if Changed then
+            AlvysDeduction.Modify(true);
         if IsPaid then
             AlvysSalesMgt.UpdateSplitDeduction(AlvysDeduction."Entry No.");
     end;
@@ -293,9 +305,13 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
     /// <summary>
     /// A statement line does not carry the Id of the deduction it paid, only its description and
     /// amount, so that is what a deduction is matched on, within its own owner operator's
-    /// statements. The description names the posted invoice, and a part of a split adds its
-    /// "(part n)" to it, so it tells deductions apart; the amount guards against a description
-    /// edited to match another. A line is used for one deduction only.
+    /// statements. The description names the posted invoice or the repair order, and a part of a
+    /// split adds its "(part n)" to it, so it tells deductions apart; the amount guards against a
+    /// description edited to match another. A line is used for one deduction only.
+    ///
+    /// The description Alvys has now is tried first, as the statement carries the text the
+    /// deduction had when it was generated; the one Business Central sent covers a deduction the
+    /// poll has not read a description for, and a statement generated before an edit.
     /// </summary>
     internal procedure MatchStatements(var AlvysDeduction: Record "BAASI Alvys Deduction"; var Statements: JsonArray)
     var
@@ -348,16 +364,30 @@ codeunit 80805 "BAASI Alvys Settlement Poll"
             until Unlinked.Next() = 0;
 
         foreach EntryNo in EntryNos do
-            if Unlinked.Get(EntryNo) then
-                for i := 1 to LineKeys.Count() do
-                    if not Used.Get(i) then
-                        if LineKeys.Get(i) = StatementLineKey(Unlinked."Owner Operator Id", Unlinked.Description, Unlinked.Amount) then begin
-                            Used.Set(i, true);
-                            Unlinked."Statement No." := StatementNos.Get(i);
-                            Unlinked."Statement Date" := StatementDates.Get(i);
-                            Unlinked.Modify(true);
-                            break;
-                        end;
+            if Unlinked.Get(EntryNo) then begin
+                i := 0;
+                if Unlinked."Alvys Description".Trim() <> '' then
+                    i := UnusedLineIndex(LineKeys, Used, StatementLineKey(Unlinked."Owner Operator Id", Unlinked."Alvys Description", Unlinked.Amount));
+                if i = 0 then
+                    i := UnusedLineIndex(LineKeys, Used, StatementLineKey(Unlinked."Owner Operator Id", Unlinked.Description, Unlinked.Amount));
+                if i <> 0 then begin
+                    Used.Set(i, true);
+                    Unlinked."Statement No." := StatementNos.Get(i);
+                    Unlinked."Statement Date" := StatementDates.Get(i);
+                    Unlinked.Modify(true);
+                end;
+            end;
+    end;
+
+    local procedure UnusedLineIndex(var LineKeys: List of [Text]; var Used: List of [Boolean]; LineKey: Text): Integer
+    var
+        i: Integer;
+    begin
+        for i := 1 to LineKeys.Count() do
+            if not Used.Get(i) then
+                if LineKeys.Get(i) = LineKey then
+                    exit(i);
+        exit(0);
     end;
 
     local procedure StatementLineKey(DriverId: Text; Description: Text; Amount: Decimal): Text

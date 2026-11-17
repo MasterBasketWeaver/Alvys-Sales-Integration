@@ -16,6 +16,10 @@ codeunit 89973 "BAASIT Test Dispatch"
                     Methods.Add('ImportTrucksRenamesTruckWhenFleetrockDriverChanges');
                     Methods.Add('ImportTrucksKeepsNameWhenFleetrockHasNoDriver');
                     Methods.Add('ImportTrucksBlocksInactiveTruck');
+                    Methods.Add('ImportTrucksKeepsInactiveTruckOpenUntilItsSettlementIsPosted');
+                    Methods.Add('ImportTrucksKeepsInactiveTruckOpenForDeductionOnItsAlvysID');
+                    Methods.Add('ImportTrucksBlocksInactiveTruckWithNothingToPost');
+                    Methods.Add('ImportTrucksHoldsInactiveTruckForUnpostedSplitPartsOnly');
                     Methods.Add('ImportTrucksDoesNotBlockTruckInShop');
                     Methods.Add('ImportTrucksDoesNotUnblockTruck');
                     Methods.Add('ImportTrucksSkipsTruckNumberTooLongForCode');
@@ -57,6 +61,8 @@ codeunit 89973 "BAASIT Test Dispatch"
                     Methods.Add('CreateDeductionForDriverCreatesDeduction');
                     Methods.Add('CreateDeductionForTruckFromPostedInvoiceLinksBothDocuments');
                     Methods.Add('CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails');
+                    Methods.Add('PostingInvoiceNotFromFleetrockCreatesNoDeduction');
+                    Methods.Add('PostingInvoiceFromFleetrockCreatesDeduction');
                     Methods.Add('CreateDeductionWithBlankAssetIDFails');
                     Methods.Add('MapDocumentTypeMapsOrdersAndInvoices');
                     Methods.Add('MapDocumentTypeRejectsUnsupportedDocumentTypes');
@@ -94,6 +100,10 @@ codeunit 89973 "BAASIT Test Dispatch"
                     Methods.Add('FourSplitsDeepPostEachLeafAsItIsAppliedWhenAutoPosting');
                     Methods.Add('SettledDeductionIsLinkedToTheStatementThatPaidIt');
                     Methods.Add('StatementLineIsNotMatchedAcrossOwnerOperatorsOrAmounts');
+                    Methods.Add('PollKeepsTheDescriptionAlvysHasForADeduction');
+                    Methods.Add('StatementLineWithTheAlvysDescriptionLinksTheDeduction');
+                    Methods.Add('StatementLineWithTheDescriptionSentLinksTheDeduction');
+                    Methods.Add('SplitPartsKeepTheDescriptionAlvysGaveThem');
                     Methods.Add('DeductionNoStatementListsPostsOnTheWorkDate');
                     Methods.Add('SettlementOnAFutureStatementDatePostsWithoutAWarning');
                     Methods.Add('SettlementOnAStatementDatedBeforeTheInvoicePostsOnTheInvoiceDate');
@@ -198,6 +208,14 @@ codeunit 89973 "BAASIT Test Dispatch"
                 Tests.ImportTrucksKeepsNameWhenFleetrockHasNoDriver();
             'ImportTrucksBlocksInactiveTruck':
                 Tests.ImportTrucksBlocksInactiveTruck();
+            'ImportTrucksKeepsInactiveTruckOpenUntilItsSettlementIsPosted':
+                Tests.ImportTrucksKeepsInactiveTruckOpenUntilItsSettlementIsPosted();
+            'ImportTrucksKeepsInactiveTruckOpenForDeductionOnItsAlvysID':
+                Tests.ImportTrucksKeepsInactiveTruckOpenForDeductionOnItsAlvysID();
+            'ImportTrucksBlocksInactiveTruckWithNothingToPost':
+                Tests.ImportTrucksBlocksInactiveTruckWithNothingToPost();
+            'ImportTrucksHoldsInactiveTruckForUnpostedSplitPartsOnly':
+                Tests.ImportTrucksHoldsInactiveTruckForUnpostedSplitPartsOnly();
             'ImportTrucksDoesNotBlockTruckInShop':
                 Tests.ImportTrucksDoesNotBlockTruckInShop();
             'ImportTrucksDoesNotUnblockTruck':
@@ -290,6 +308,10 @@ codeunit 89973 "BAASIT Test Dispatch"
                 Tests.CreateDeductionForTruckFromPostedInvoiceLinksBothDocuments();
             'CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails':
                 Tests.CreateDeductionForTruckFromPostedInvoiceWithoutTractorCodeFails();
+            'PostingInvoiceNotFromFleetrockCreatesNoDeduction':
+                Tests.PostingInvoiceNotFromFleetrockCreatesNoDeduction();
+            'PostingInvoiceFromFleetrockCreatesDeduction':
+                Tests.PostingInvoiceFromFleetrockCreatesDeduction();
             'CreateDeductionWithBlankAssetIDFails':
                 Tests.CreateDeductionWithBlankAssetIDFails();
             'MapDocumentTypeMapsOrdersAndInvoices':
@@ -364,6 +386,14 @@ codeunit 89973 "BAASIT Test Dispatch"
                 Tests.SettledDeductionIsLinkedToTheStatementThatPaidIt();
             'StatementLineIsNotMatchedAcrossOwnerOperatorsOrAmounts':
                 Tests.StatementLineIsNotMatchedAcrossOwnerOperatorsOrAmounts();
+            'PollKeepsTheDescriptionAlvysHasForADeduction':
+                Tests.PollKeepsTheDescriptionAlvysHasForADeduction();
+            'StatementLineWithTheAlvysDescriptionLinksTheDeduction':
+                Tests.StatementLineWithTheAlvysDescriptionLinksTheDeduction();
+            'StatementLineWithTheDescriptionSentLinksTheDeduction':
+                Tests.StatementLineWithTheDescriptionSentLinksTheDeduction();
+            'SplitPartsKeepTheDescriptionAlvysGaveThem':
+                Tests.SplitPartsKeepTheDescriptionAlvysGaveThem();
             'DeductionNoStatementListsPostsOnTheWorkDate':
                 Tests.DeductionNoStatementListsPostsOnTheWorkDate();
             'SettlementOnAFutureStatementDatePostsWithoutAWarning':
